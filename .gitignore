@@ -1,0 +1,21 @@
+# dependencies
+/node_modules
+
+# next.js build output
+/.next
+/out
+
+# typescript
+next-env.d.ts
+*.tsbuildinfo
+
+# testing
+/coverage
+
+# misc
+.DS_Store
+*.log
+
+# Raw third-party asset source packs (Kenney). Large (~94MB, 6k+ files) and not
+# needed at runtime — the game loads the curated copies under public/models.
+/assets
