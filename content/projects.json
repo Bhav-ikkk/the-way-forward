@@ -1,0 +1,37 @@
+[
+  {
+    "id": "project.world-engine",
+    "name": "Portfolio World Engine",
+    "description": "A data-driven interactive 3D portfolio where handcrafted scenes are populated from plain JSON content files.",
+    "techStack": ["TypeScript", "Next.js", "React", "PlayCanvas", "Zod"],
+    "role": "Creator & Lead Developer",
+    "url": "https://example.com/world-engine",
+    "repoUrl": "https://example.com/git/world-engine",
+    "highlights": [
+      "Separated content from presentation via a validated Data_Schema",
+      "Client-only engine boundary keeps the build SSR-safe"
+    ],
+    "assetId": "world.road.segment"
+  },
+  {
+    "id": "project.collab-board",
+    "name": "Constellation Board",
+    "description": "A real-time collaborative whiteboard for distributed teams to sketch ideas together.",
+    "techStack": ["TypeScript", "React", "WebSockets", "Node.js"],
+    "role": "Full-Stack Developer",
+    "repoUrl": "https://example.com/git/constellation-board",
+    "highlights": [
+      "Conflict-free merging of concurrent edits",
+      "Sub-100ms cursor sync across regions"
+    ],
+    "assetId": "prop.lightpost.single"
+  },
+  {
+    "id": "project.cli-toolkit",
+    "name": "Sprout CLI Toolkit",
+    "description": "A small collection of command-line tools that scaffold and lint data-driven projects.",
+    "techStack": ["TypeScript", "Node.js"],
+    "role": "Maintainer",
+    "url": "https://example.com/sprout"
+  }
+]
