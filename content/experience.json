@@ -1,0 +1,25 @@
+[
+  {
+    "id": "exp.lumina",
+    "company": "Lumina Interactive",
+    "role": "Senior Full-Stack Developer",
+    "startDate": "2021-03-01",
+    "endDate": null,
+    "summary": "Leads development of data-driven web experiences and mentors a small team of engineers.",
+    "highlights": [
+      "Introduced a swappable content architecture adopted across three products",
+      "Cut build times by half by modularising the front-end"
+    ]
+  },
+  {
+    "id": "exp.pixelforge",
+    "company": "PixelForge Studio",
+    "role": "Web Developer",
+    "startDate": "2018-06-01",
+    "endDate": "2021-02-28",
+    "summary": "Built interactive marketing sites and internal tooling for a creative agency.",
+    "highlights": [
+      "Shipped a dozen client microsites on a shared component library"
+    ]
+  }
+]
