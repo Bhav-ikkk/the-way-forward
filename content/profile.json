@@ -1,0 +1,12 @@
+{
+  "name": "Dev Demoson",
+  "title": "Full-Stack Developer & Interactive Experience Builder",
+  "tagline": "Turning ideas into explorable worlds.",
+  "bio": "Dev Demoson is a fictional demonstration developer who builds playful, data-driven web experiences. This profile is sample content shipped to show how the Portfolio World Engine populates its handcrafted scenes.",
+  "avatarAssetId": "character.male.a",
+  "knowledgeSummary": "Comfortable across the modern web stack — TypeScript, React, and Next.js on the front end, Node services and SQL/NoSQL data stores on the back end, plus real-time 3D in the browser with WebGL engines.",
+  "workSummary": "Has shipped interactive portfolio worlds, a collaborative whiteboard, and a small fleet of developer tools, always favouring clear architecture and swappable, data-driven content.",
+  "thinkingApproach": "Starts from the story a system needs to tell, decomposes it into independently replaceable parts, and validates assumptions early with small, testable slices before scaling up.",
+  "futureDirection": "Exploring AI-assisted authoring tooling and richer handcrafted scenes so non-developers can populate immersive portfolios by editing plain data files.",
+  "collaborationValue": "Brings calm, pragmatic delivery: communicates trade-offs plainly, keeps systems simple enough to hand off, and leaves documentation a teammate can actually follow."
+}
