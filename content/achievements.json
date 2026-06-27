@@ -1,0 +1,20 @@
+[
+  {
+    "id": "ach.open-source-award",
+    "title": "Open Source Contributor of the Year",
+    "description": "Recognised by the Demo Developer Community for sustained contributions to data-driven tooling.",
+    "date": "2023-11-15",
+    "url": "https://example.com/awards/open-source"
+  },
+  {
+    "id": "ach.conference-talk",
+    "title": "Speaker, WebWorlds Conference",
+    "description": "Presented a talk on separating content from presentation in interactive 3D portfolios.",
+    "date": "2023-05-20"
+  },
+  {
+    "id": "ach.hackathon",
+    "title": "First Place, Spring Hackathon",
+    "description": "Built a prototype of the Portfolio World Engine in 48 hours with a small team."
+  }
+]
