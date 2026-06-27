@@ -1,0 +1,8 @@
+[
+  { "id": "skill.typescript", "name": "TypeScript", "category": "Languages", "proficiency": 5, "years": 6 },
+  { "id": "skill.react", "name": "React", "category": "Frontend", "proficiency": 5, "years": 5 },
+  { "id": "skill.nextjs", "name": "Next.js", "category": "Frontend", "proficiency": 4, "years": 3 },
+  { "id": "skill.node", "name": "Node.js", "category": "Backend", "proficiency": 4, "years": 5 },
+  { "id": "skill.playcanvas", "name": "PlayCanvas", "category": "3D / WebGL", "proficiency": 3, "years": 2 },
+  { "id": "skill.sql", "name": "SQL", "category": "Data", "proficiency": 4 }
+]
