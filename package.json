@@ -1,0 +1,44 @@
+{
+  "name": "portfolio-world-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An open-source, data-driven interactive 3D developer portfolio world built on Next.js and the PlayCanvas engine.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "cross-env ESLINT_USE_FLAT_CONFIG=true eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.19.3",
+    "next": "14.2.35",
+    "playcanvas": "2.7.7",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.1.0",
+    "@testing-library/react": "14.3.1",
+    "@types/node": "20.14.10",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "autoprefixer": "10.4.20",
+    "cross-env": "7.0.3",
+    "eslint": "8.57.1",
+    "eslint-config-next": "14.2.35",
+    "eslint-config-prettier": "9.1.0",
+    "fast-check": "3.23.1",
+    "happy-dom": "15.11.7",
+    "postcss": "8.4.47",
+    "prettier": "3.3.3",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.4.5",
+    "vitest": "2.1.8"
+  }
+}
