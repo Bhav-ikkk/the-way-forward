@@ -1,0 +1,6 @@
+[
+  { "platform": "github", "label": "@devdemoson", "url": "https://example.com/github/devdemoson" },
+  { "platform": "linkedin", "label": "Dev Demoson", "url": "https://example.com/in/devdemoson" },
+  { "platform": "mastodon", "label": "@dev@demo.social", "url": "https://example.com/@dev" },
+  { "platform": "website", "label": "devdemoson.example", "url": "https://devdemoson.example" }
+]
