@@ -1,0 +1,17 @@
+[
+  {
+    "id": "signpost.crossroads",
+    "speaker": "Weathered Signpost",
+    "lines": [
+      "Workshop ahead. Library to the left. Mind the bridge — the boards are sound but they like to creak."
+    ]
+  },
+  {
+    "id": "signpost.bridge",
+    "speaker": "Carved Marker",
+    "lines": [
+      "The river runs cold and quick here.",
+      "Cross slow, and the water will carry your reflection the rest of the way."
+    ]
+  }
+]
