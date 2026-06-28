@@ -1,0 +1,37 @@
+[
+  {
+    "id": "timeline.first-line",
+    "date": "2014",
+    "title": "Wrote the first line of code",
+    "description": "Built a clumsy little website for a school club and got hooked on making things that other people could use.",
+    "kind": "milestone"
+  },
+  {
+    "id": "timeline.graduated",
+    "date": "2018-06",
+    "title": "Graduated in Computer Science",
+    "description": "Finished a degree heavy on systems and human-centred design, then jumped straight into shipping product.",
+    "kind": "education"
+  },
+  {
+    "id": "timeline.first-role",
+    "date": "2018-09",
+    "title": "Joined Demo Labs as a Junior Engineer",
+    "description": "Learned how real teams ship software, from code review etiquette to keeping the lights on at 3am.",
+    "kind": "role"
+  },
+  {
+    "id": "timeline.first-world",
+    "date": "2022-03",
+    "title": "Shipped a data-driven portfolio world",
+    "description": "Released the first interactive, explorable portfolio that anyone could re-skin by editing plain data files.",
+    "kind": "release"
+  },
+  {
+    "id": "timeline.exploring-ai",
+    "date": "2024",
+    "title": "Started exploring AI-assisted authoring",
+    "description": "Began prototyping tools that let non-developers populate immersive scenes through natural-language editing.",
+    "kind": "milestone"
+  }
+]
