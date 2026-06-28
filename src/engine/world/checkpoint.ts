@@ -4,7 +4,7 @@ import type { Path } from "./path";
 import type { LandmarkSpec } from "./landmarks";
 import { type Marker, yawFromDir } from "./shared";
 import { buildChapterStructure, type StructureFrame } from "./structures";
-import type { Checkpoint, ColliderSpec } from "./types";
+import type { Checkpoint, ColliderSpec, Interactable } from "./types";
 
 /**
  * Checkpoint system: the narrative chapter STRUCTURES the player arrives at and
@@ -64,6 +64,7 @@ export function placeLandmark(
   checkpoints: Checkpoint[],
   colliders: ColliderSpec[],
   markers: Marker[],
+  interactables: Interactable[],
 ): void {
   const s = path.sample(lm.t);
   // Right-of-travel normal in XZ.
@@ -92,7 +93,7 @@ export function placeLandmark(
     marker: lm.marker,
   };
 
-  buildChapterStructure(app, lm.id, frame, colliders, markers);
+  const handle = buildChapterStructure(app, lm.id, frame, colliders, markers);
 
   // Checkpoint trigger sits on the path side of the structure anchor so the
   // dialogue fires as the player arrives at the door, not only when off-path.
@@ -103,4 +104,17 @@ export function placeLandmark(
     position: new pc.Vec3(cpX, 0, cpZ),
     radius: lm.radius,
   });
+
+  // Register the structure as an interactable the player can approach + enter.
+  // The approach centre matches the checkpoint trigger (on the path, at the
+  // door); the title is the chapter title (copy.speaker), sourced from content.
+  if (handle) {
+    interactables.push({
+      id: lm.id,
+      title: copy.speaker,
+      position: new pc.Vec3(cpX, 0, cpZ),
+      radius: lm.radius,
+      setHighlight: handle.setHighlight,
+    });
+  }
 }

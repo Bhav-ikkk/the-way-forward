@@ -1,6 +1,10 @@
 import * as pc from "playcanvas";
 
 import { CameraRig } from "./CameraRig";
+import {
+  InteractionController,
+  type InteractionOptions,
+} from "./InteractionController";
 import type { Physics } from "./physics";
 import type { Path } from "./world/path";
 import type { Checkpoint, CheckpointInfo } from "./world/types";
@@ -39,6 +43,14 @@ interface ControllerOptions {
   initialDistance: number;
   /** App mouse used to drive the cinematic orbit camera rig. */
   mouse?: pc.Mouse | null;
+  /** Canvas element used by the camera rig for touch orbit + pinch gestures. */
+  canvas?: HTMLCanvasElement | null;
+  /**
+   * Optional building-interaction layer. When provided, the controller builds
+   * an {@link InteractionController}, feeds it the on-rails position each frame,
+   * and pauses it (with movement + orbit) while a panel is open.
+   */
+  interaction?: InteractionOptions | null;
 }
 
 /** Shortest signed angular difference (degrees) from `a` to `b`. */
@@ -77,13 +89,22 @@ export class CharacterController {
   private readonly path: Path;
   private readonly pathLength: number;
   private readonly rig: CameraRig;
+  private readonly interaction: InteractionController | null;
 
   private physics: Physics | null = null;
+  /** When true, movement + camera orbit + enter-input are frozen (panel open). */
+  private paused = false;
 
   /** Distance along the path (world units), the single movement DOF. */
   private s: number;
   /** Smoothed along-path speed (units/s); signed (+ forward, - backward). */
   private speed = 0;
+  /**
+   * On-rails drive coming from the touch UI (the hold-to-walk control), in
+   * [-1, 1]. Blended with keyboard input each frame ("max magnitude wins" so
+   * the two input sources never fight). Set via {@link setMoveInput}.
+   */
+  private touchDrive = 0;
   private yaw = 0;
   private walkPhase = 0;
   private posX = 0;
@@ -122,7 +143,13 @@ export class CharacterController {
       camera,
       options.mouse ?? null,
       tangentYaw * pc.math.DEG_TO_RAD,
+      options.canvas ?? null,
     );
+
+    // Optional building-interaction layer (highlight + enter + nameplate).
+    this.interaction = options.interaction
+      ? new InteractionController(camera, options.interaction)
+      : null;
 
     this.onUpdate = (dt: number) => this.update(dt);
     this.app.on("update", this.onUpdate);
@@ -140,20 +167,49 @@ export class CharacterController {
     physics.setCharacterPosition({ x: this.posX, y: this.posY, z: this.posZ });
   }
 
+  /**
+   * Freeze/unfreeze player movement, camera orbit input, and enter-input. The
+   * App_Framework calls this (via the engine handle's `setInputPaused`) when an
+   * info panel opens/closes so the player isn't walking or spinning behind it.
+   */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.rig.setPaused(paused);
+    this.interaction?.setPaused(paused);
+  }
+
+  /**
+   * Drive on-rails movement from the UI (mobile hold-to-walk control). `drive`
+   * is clamped to [-1, 1]: +1 forward, -1 back, 0 idle. It is blended with the
+   * keyboard each frame — whichever source has the larger magnitude wins, so
+   * keyboard and touch never fight — and runs through the same accel/decel ramp.
+   */
+  setMoveInput(drive: number): void {
+    this.touchDrive = pc.math.clamp(drive, -1, 1);
+  }
+
   private update(dt: number): void {
     const kb = this.app.keyboard;
 
     // ---- Read input (forward / backward only — no strafing) -------------
+    // While paused (a panel is open) all drive is suppressed so the player
+    // eases to a stop and never walks behind the panel. Keyboard and the touch
+    // hold-to-walk control are blended: whichever has the larger magnitude wins.
     let drive = 0;
-    if (kb) {
-      if (kb.isPressed(pc.KEY_W) || kb.isPressed(pc.KEY_UP)) drive += 1;
-      if (kb.isPressed(pc.KEY_S) || kb.isPressed(pc.KEY_DOWN)) drive -= 1;
+    if (!this.paused) {
+      let kbDrive = 0;
+      if (kb) {
+        if (kb.isPressed(pc.KEY_W) || kb.isPressed(pc.KEY_UP)) kbDrive += 1;
+        if (kb.isPressed(pc.KEY_S) || kb.isPressed(pc.KEY_DOWN)) kbDrive -= 1;
+      }
+      drive =
+        Math.abs(this.touchDrive) > Math.abs(kbDrive) ? this.touchDrive : kbDrive;
     }
     const moving = drive !== 0;
 
     // ---- Smooth along-path speed ramp (ease in/out + inertia) -----------
     const targetSpeed =
-      drive > 0 ? WALK_SPEED : drive < 0 ? -REVERSE_SPEED : 0;
+      drive > 0 ? WALK_SPEED * drive : drive < 0 ? REVERSE_SPEED * drive : 0;
     const rampRate = moving ? ACCEL_RATE : DECEL_RATE;
     const ramp = 1 - Math.exp(-rampRate * dt);
     this.speed = pc.math.lerp(this.speed, targetSpeed, ramp);
@@ -218,6 +274,9 @@ export class CharacterController {
 
     // ---- Checkpoint detection (distance-based against on-rails pos) -----
     this.checkCheckpoints();
+
+    // ---- Building interaction (highlight + nearest + nameplate) ---------
+    this.interaction?.update(dt, this.posX, this.posY, this.posZ);
   }
 
   private checkCheckpoints(): void {
@@ -242,5 +301,6 @@ export class CharacterController {
   destroy(): void {
     this.app.off("update", this.onUpdate);
     this.rig.destroy();
+    this.interaction?.destroy();
   }
 }

@@ -13,6 +13,80 @@ import {
 import type { ColliderSpec } from "./types";
 
 /**
+ * A handle to a chapter structure's SUBTLE interaction highlight.
+ *
+ * `setHighlight(factor)` ramps the building's accent light + a soft ground glow
+ * ring between idle (`0`) and fully highlighted (`1`). The
+ * {@link ../InteractionController} eases this factor so the highlight fades in
+ * as the player approaches and out as they leave — tasteful, not a hard
+ * outline.
+ */
+export interface StructureHandle {
+  /** Stable chapter id (matches the landmark / chapter content). */
+  id: string;
+  /** Drive the highlight; `factor` 0 (idle) → 1 (highlighted). */
+  setHighlight: (factor: number) => void;
+}
+
+/** How much the accent light(s) brighten at full highlight (fraction). */
+const HILITE_LIGHT_BOOST = 0.7;
+/** Peak opacity of the soft ground glow ring at full highlight. */
+const RING_MAX_OPACITY = 0.5;
+/** Radius (world units) of the ground glow disc around a structure anchor. */
+const RING_RADIUS = 5.4;
+
+/**
+ * Build the subtle highlight for a freshly-composed structure: a soft emissive
+ * ground glow disc at its anchor plus an accent-light boost. The markers it
+ * affects are exactly those appended to `markers` since `startMarkerIndex`
+ * (i.e. this structure's own accent lights). Returns a {@link StructureHandle}.
+ */
+function makeHighlight(
+  app: pc.AppBase,
+  id: string,
+  f: StructureFrame,
+  markers: Marker[],
+  startMarkerIndex: number,
+  coolGlow: boolean,
+): StructureHandle {
+  const mine = markers.slice(startMarkerIndex);
+  const baseIntensity = mine.map((m) => m.baseIntensity);
+
+  const glow = coolGlow ? LAYOUT.marker.coolColor : LAYOUT.marker.color;
+  const ringMat = makeMaterial(glow, { emissive: true, opacity: 0.001 });
+  const ring = addPrimitive(
+    app,
+    "cylinder",
+    ringMat,
+    [f.ox, 0.06, f.oz],
+    [RING_RADIUS, 0.04, RING_RADIUS],
+  );
+  ring.enabled = false;
+
+  let last = -1;
+  const setHighlight = (factor: number): void => {
+    const ff = factor < 0 ? 0 : factor > 1 ? 1 : factor;
+    if (Math.abs(ff - last) < 0.002) return;
+    last = ff;
+    // Boost (and let stepMarkers keep flickering around) the accent lights.
+    for (let i = 0; i < mine.length; i++) {
+      mine[i].baseIntensity = baseIntensity[i] * (1 + HILITE_LIGHT_BOOST * ff);
+    }
+    // Fade + gently swell the ground glow ring.
+    const on = ff > 0.02;
+    ring.enabled = on;
+    if (on) {
+      ringMat.opacity = RING_MAX_OPACITY * ff;
+      ringMat.update();
+      const s = RING_RADIUS * (1 + 0.14 * ff);
+      ring.setLocalScale(s, 0.04, s);
+    }
+  };
+
+  return { id, setHighlight };
+}
+
+/**
  * Structures system: the handcrafted, per-chapter environmental BUILDINGS the
  * player arrives at. This pass replaces the old "floating lantern / firepit"
  * markers with real architecture assembled from the building kit
@@ -273,7 +347,8 @@ export function buildArrivalCabin(
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
-): void {
+): StructureHandle {
+  const startMarker = markers.length;
   const batch = new KitBatch();
   buildRect(app, batch, f, {
     halfAlong: 3.0,
@@ -291,6 +366,7 @@ export function buildArrivalCabin(
 
   accent(app, markers, f, 1.8, -3.1, 1.7, "lantern");
   pushFootprint(colliders, "arrival-camp", f, 3.4, 3.0, WALL_SCALE);
+  return makeHighlight(app, "arrival-camp", f, markers, startMarker, false);
 }
 
 /** Workshop — an open-front canvas/timber workshop, industrious + hands-on. */
@@ -477,7 +553,9 @@ function buildLighthouse(
 
 /**
  * Build the chapter structure for `id` into the world, emitting its colliders
- * + accent markers. Unknown ids are a safe no-op (the checkpoint still fires).
+ * + accent markers, and return a {@link StructureHandle} for its subtle
+ * approach highlight. Unknown ids are a safe no-op returning `null` (the
+ * checkpoint still fires).
  */
 export function buildChapterStructure(
   app: pc.AppBase,
@@ -485,7 +563,8 @@ export function buildChapterStructure(
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
-): void {
+): StructureHandle | null {
+  const startMarker = markers.length;
   switch (id) {
     case "workshop":
       buildWorkshop(app, f, colliders, markers);
@@ -503,6 +582,7 @@ export function buildChapterStructure(
       buildLighthouse(app, f, colliders, markers);
       break;
     default:
-      break;
+      return null;
   }
+  return makeHighlight(app, id, f, markers, startMarker, id === "ai-laboratory");
 }

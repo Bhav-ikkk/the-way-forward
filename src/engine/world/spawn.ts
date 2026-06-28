@@ -1,7 +1,15 @@
 import type * as pc from "playcanvas";
 
 import type { Path } from "./path";
-import { SPAWN_T } from "./landmarks";
+import {
+  ARRIVAL_CABIN_OFFSET,
+  computeKeepClearZones,
+  isInKeepClear,
+  type KeepClearZone,
+  SPAWN_CLEARING_T,
+  SPAWN_FIRE_OFFSET,
+  SPAWN_T,
+} from "./landmarks";
 import type { Marker } from "./shared";
 import { buildArrivalCabin, type StructureFrame } from "./structures";
 import {
@@ -14,7 +22,7 @@ import {
   type ScenerySpec,
   yawFromDir,
 } from "./shared";
-import type { ColliderSpec } from "./types";
+import type { ColliderSpec, Interactable } from "./types";
 
 /** What the spawn system hands back to the orchestrator. */
 export interface SpawnResult {
@@ -47,14 +55,16 @@ export function buildSpawn(
   path: Path,
   colliders: ColliderSpec[],
   markers: Marker[],
+  interactables: Interactable[],
+  arrivalTitle: string,
 ): SpawnResult {
   const spawnSample = path.sample(SPAWN_T);
   const spawnYaw = yawFromDir(spawnSample.tangent.x, spawnSample.tangent.z);
 
-  const clearing = path.sample(0.05).position;
+  const clearing = path.sample(SPAWN_CLEARING_T).position;
   // Campfire sits just off the path centre so the player doesn't spawn in it.
-  const fireX = clearing.x - 3.2;
-  const fireZ = clearing.z + 1.5;
+  const fireX = clearing.x + SPAWN_FIRE_OFFSET.x;
+  const fireZ = clearing.z + SPAWN_FIRE_OFFSET.z;
 
   // ---- Campfire ----------------------------------------------------------
   loadModel(app, "/models/campfire.glb", (root) => {
@@ -133,10 +143,13 @@ export function buildSpawn(
   buildCampFence(app, path, colliders);
 
   // ---- Ground foliage so the camp feels lived-in (decorative) -----------
-  buildCampFoliage(app, fireX, fireZ);
+  // The camp dresses around its OWN fire, but still keeps clear of the cabin +
+  // the along-path structures so no grass clips into a building.
+  const keepClear = computeKeepClearZones(path);
+  buildCampFoliage(app, fireX, fireZ, keepClear);
 
   // ---- Arrival cabin: the fully-built shelter beside the fire -----------
-  buildArrivalShelter(app, path, colliders, markers);
+  buildArrivalShelter(app, path, colliders, markers, interactables, arrivalTitle);
 
   return { spawn: spawnSample.position, spawnYaw, fireX, fireZ };
 }
@@ -152,11 +165,13 @@ function buildArrivalShelter(
   path: Path,
   colliders: ColliderSpec[],
   markers: Marker[],
+  interactables: Interactable[],
+  arrivalTitle: string,
 ): void {
-  const cs = path.sample(0.05);
+  const cs = path.sample(SPAWN_CLEARING_T);
   const rightX = cs.tangent.z;
   const rightZ = -cs.tangent.x;
-  const offset = 7.5; // right of the clearing, clear of the fire + seating
+  const offset = ARRIVAL_CABIN_OFFSET; // right of the clearing, clear of the fire + seating
   const ax = cs.position.x + rightX * offset;
   const az = cs.position.z + rightZ * offset;
   const frame: StructureFrame = {
@@ -169,7 +184,19 @@ function buildArrivalShelter(
     faceYaw: yawFromDir(-rightX, -rightZ),
     marker: "lantern",
   };
-  buildArrivalCabin(app, frame, colliders, markers);
+  const handle = buildArrivalCabin(app, frame, colliders, markers);
+
+  // Register the camp as an interactable. Its approach centre is the spawn
+  // clearing on the path so walking the player back into camp re-highlights it
+  // and lets them re-open the profile panel.
+  const spawnPt = path.sample(SPAWN_T).position;
+  interactables.push({
+    id: "arrival-camp",
+    title: arrivalTitle,
+    position: spawnPt,
+    radius: 7,
+    setHighlight: handle.setHighlight,
+  });
 }
 
 /** Two warm lit lanterns flanking the path where it leaves the camp. */
@@ -234,12 +261,22 @@ function buildCampFence(app: pc.AppBase, path: Path, colliders: ColliderSpec[]):
 }
 
 /** Tufts of grass, flowers, bushes, and a mushroom dressing the camp ground. */
-function buildCampFoliage(app: pc.AppBase, fireX: number, fireZ: number): void {
+function buildCampFoliage(
+  app: pc.AppBase,
+  fireX: number,
+  fireZ: number,
+  keepClear: readonly KeepClearZone[],
+): void {
   const grass: Placement[] = [];
   const bush: Placement[] = [];
   const flowerRed: Placement[] = [];
   const flowerYellow: Placement[] = [];
   const mushroom: Placement[] = [];
+
+  // The camp's own "spawn-camp" zone is excluded so the foliage can dress
+  // around its own fire; all other building aprons (cabin + landmarks) are
+  // respected so nothing clips a structure.
+  const exclude = new Set(["spawn-camp"]);
 
   // Scatter a deterministic ring of detail around the camp, kept clear of the
   // fire itself so nothing sits in the flames.
@@ -249,6 +286,8 @@ function buildCampFoliage(app: pc.AppBase, fireX: number, fireZ: number): void {
     const r = 4.5 + hash01(i * 2.9) * 4.5; // 4.5 .. 9 from the fire
     const x = fireX + Math.cos(a) * r;
     const z = fireZ + Math.sin(a) * r;
+    // Skip foliage that would clip into the cabin (or any other structure).
+    if (isInKeepClear(x, z, keepClear, exclude)) continue;
     const yaw = hash01(i * 4.1) * 360;
     const p: Placement = { position: [x, 0, z], yaw, scale: 0.9 + hash01(i * 5.3) * 0.6 };
     const pick = hash01(i * 6.7);

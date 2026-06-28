@@ -17,6 +17,8 @@ export const projectSchema = z
     url: z.string().optional(),
     repoUrl: z.string().optional(),
     highlights: z.array(z.string()).optional(),
+    /** Optional screenshot image URLs shown in the building info panel. */
+    screenshots: z.array(z.string()).optional(),
     assetId: z.string().optional(),
   })
   .strict();

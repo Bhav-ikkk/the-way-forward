@@ -21,4 +21,11 @@ canvas {
   inset: 0;
   width: 100%;
   height: 100%;
+  /*
+   * Let touch gestures over the canvas drive the camera (one-finger orbit,
+   * two-finger pinch) instead of scrolling / pinch-zooming the page. The
+   * CameraRig also calls preventDefault on its touch handlers as a belt-and-
+   * braces guard for browsers that don't fully honour touch-action.
+   */
+  touch-action: none;
 }

@@ -1,17 +1,10 @@
 [
   {
-    "id": "edu.state-university",
-    "institution": "Demo State University",
-    "credential": "B.Sc. Computer Science",
-    "field": "Interactive Media & Software Engineering",
-    "startDate": "2014-09-01",
-    "endDate": "2018-05-31"
-  },
-  {
-    "id": "edu.online-academy",
-    "institution": "Open Web Academy",
-    "credential": "Certificate in Real-Time 3D Graphics",
-    "startDate": "2022-01-01",
+    "id": "edu.chhavi-devi",
+    "institution": "Chhavi Devi Group of Institutions",
+    "credential": "Computer Science (Student)",
+    "field": "Computer Science",
+    "startDate": "2022-08-01",
     "endDate": null
   }
 ]

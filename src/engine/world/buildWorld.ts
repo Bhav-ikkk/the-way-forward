@@ -19,6 +19,7 @@ import type {
   Checkpoint,
   CheckpointInfo,
   ColliderSpec,
+  Interactable,
   WelcomeInfo,
 } from "./types";
 
@@ -36,6 +37,11 @@ export interface World {
   camera: pc.Entity;
   /** All checkpoints placed in the world (landmarks + NPC greeter). */
   checkpoints: Checkpoint[];
+  /**
+   * All approachable+enterable chapter structures (the five along-path
+   * landmarks + the arrival camp), each with its subtle highlight handle.
+   */
+  interactables: Interactable[];
   /**
    * Declarative static collider specs (ground, path-edge walls, bridge deck,
    * scenery props, landmark bases). The later Rapier pass consumes these
@@ -77,6 +83,7 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
   const checkpoints: Checkpoint[] = [];
   const colliders: ColliderSpec[] = [];
   const markers: Marker[] = [];
+  const interactables: Interactable[] = [];
 
   // All narrative copy is sourced from content/chapters.json, matched to engine
   // placements by chapter id. The engine itself holds no human-readable copy.
@@ -98,7 +105,14 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
   buildTerrain(app, path, colliders);
   buildRiver(app, path, colliders);
   buildRoad(app, path, colliders);
-  const camp = buildSpawn(app, path, colliders, markers);
+  const camp = buildSpawn(
+    app,
+    path,
+    colliders,
+    markers,
+    interactables,
+    arrival?.title ?? "",
+  );
   buildNpc(app, checkpoints, {
     fireX: camp.fireX,
     fireZ: camp.fireZ,
@@ -122,6 +136,7 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
       checkpoints,
       colliders,
       markers,
+      interactables,
     );
   }
 
@@ -196,6 +211,7 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
   return {
     camera,
     checkpoints,
+    interactables,
     colliders,
     spawnYaw: camp.spawnYaw,
     path,

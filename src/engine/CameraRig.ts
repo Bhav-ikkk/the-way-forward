@@ -11,8 +11,16 @@ import type { Physics } from "./physics";
  * while the rig owns all of the camera FEEL:
  *
  * - DRAG TO ORBIT: holding the LEFT mouse button and moving the mouse rotates
- *   the camera (yaw + pitch) around the target.
+ *   the camera (yaw + pitch) around the target. On touch devices a ONE-FINGER
+ *   drag does the same, feeding the very same target-yaw/target-pitch
+ *   accumulation + sensitivities so the feel matches the mouse exactly.
  * - WHEEL ZOOM: the mouse wheel dollies the boom distance between a min and max.
+ *   On touch a TWO-FINGER PINCH maps to the same boom-distance clamp.
+ * - TOUCH TAP PASS-THROUGH: a quick single-finger tap (little movement) never
+ *   orbits — a small move threshold must be crossed before a drag begins — so
+ *   the tap falls through to the InteractionController's tap-to-enter. Default
+ *   page scrolling/pinch-zoom over the canvas is suppressed (preventDefault +
+ *   `touch-action: none`).
  * - SPRING + INERTIA: orbit angles, boom distance and camera position all ease
  *   toward their targets with a frame-rate-independent critically-damped style
  *   smoothing; the orbit keeps a little inertia after the drag is released, then
@@ -54,6 +62,18 @@ const PITCH_DEFAULT_DEG = 16;
 /** Drag sensitivity (radians of orbit per pixel of mouse movement). */
 const YAW_SENSITIVITY = 0.0075;
 const PITCH_SENSITIVITY = 0.006;
+
+/**
+ * Touch tuning. The one-finger drag reuses the same yaw/pitch accumulation +
+ * sensitivities as the mouse (so the feel matches), but a small global scale
+ * keeps a phone from feeling twitchy under a fast thumb. A drag only begins
+ * once the finger has moved past {@link TOUCH_DRAG_THRESHOLD} CSS pixels from
+ * its start, so a quick tap never orbits and falls through to tap-to-enter.
+ */
+const TOUCH_DRAG_SCALE = 0.85;
+const TOUCH_DRAG_THRESHOLD = 8;
+/** Two-finger pinch: world units of boom change per pixel of pinch-distance. */
+const PINCH_ZOOM_SENSITIVITY = 0.03;
 
 /**
  * Spring smoothing rates (per second). The fraction applied each frame is
@@ -102,6 +122,13 @@ function shortestAngle(a: number, b: number): number {
   return wrapAngle(b - a);
 }
 
+/** Pixel distance between the first two active touches (for pinch zoom). */
+function touchDistance(e: TouchEvent): number {
+  const a = e.touches[0];
+  const b = e.touches[1];
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
 /** A plain target the controller feeds the rig each frame. */
 export interface CameraTarget {
   /** Player feet world position (y ≈ 0). */
@@ -120,6 +147,7 @@ export interface CameraTarget {
 export class CameraRig {
   private readonly camera: pc.Entity;
   private readonly mouse: pc.Mouse | null;
+  private readonly canvas: HTMLCanvasElement | null;
 
   private physics: Physics | null = null;
 
@@ -135,25 +163,44 @@ export class CameraRig {
 
   // ---- Drag / inertia / idle state --------------------------------------
   private dragging = false;
+  private paused = false;
   private pendingDX = 0;
   private pendingDY = 0;
   private yawVelocity = 0;
   private idleTime = 0;
   private initialized = false;
 
+  // ---- Touch gesture state (one-finger orbit + two-finger pinch) --------
+  /** True once a single-finger drag has crossed the move threshold. */
+  private touchDragging = false;
+  /** Identifier of the finger driving the single-finger orbit (or null). */
+  private touchId: number | null = null;
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private touchLastX = 0;
+  private touchLastY = 0;
+  /** True while two fingers are down (pinch-zoom). */
+  private pinchActive = false;
+  private pinchPrevDist = 0;
+
   // Bound handlers so they can be removed on destroy (no leaks).
   private readonly onMouseDown: (e: pc.MouseEvent) => void;
   private readonly onMouseUp: (e: pc.MouseEvent) => void;
   private readonly onMouseMove: (e: pc.MouseEvent) => void;
   private readonly onMouseWheel: (e: pc.MouseEvent) => void;
+  private readonly onTouchStart: (e: TouchEvent) => void;
+  private readonly onTouchMove: (e: TouchEvent) => void;
+  private readonly onTouchEnd: (e: TouchEvent) => void;
 
   constructor(
     camera: pc.Entity,
     mouse: pc.Mouse | null,
     initialTangentYaw = 0,
+    canvas: HTMLCanvasElement | null = null,
   ) {
     this.camera = camera;
     this.mouse = mouse;
+    this.canvas = canvas;
     // Start behind the player, aligned with the initial travel direction.
     this.orbitYaw = wrapAngle(initialTangentYaw + Math.PI);
     this.targetYaw = this.orbitYaw;
@@ -182,6 +229,92 @@ export class CameraRig {
       );
     };
 
+    // ---- Touch handlers: one-finger orbit + two-finger pinch ------------
+    // DOM touch events on the canvas (PlayCanvas' Mouse covers only mouse).
+    // preventDefault stops the page from scrolling / pinch-zooming so the
+    // gesture controls the camera. A single-finger gesture only begins
+    // orbiting once it crosses TOUCH_DRAG_THRESHOLD, so a quick tap never
+    // orbits and passes through to the InteractionController's tap-to-enter.
+    this.onTouchStart = (e) => {
+      e.preventDefault();
+      if (this.paused) return;
+      if (e.touches.length >= 2) {
+        // Two fingers down → pinch zoom; abandon any single-finger drag.
+        this.touchDragging = false;
+        this.touchId = null;
+        this.pinchActive = true;
+        this.pinchPrevDist = touchDistance(e);
+      } else if (e.touches.length === 1) {
+        const t = e.touches[0];
+        this.touchId = t.identifier;
+        this.touchStartX = this.touchLastX = t.clientX;
+        this.touchStartY = this.touchLastY = t.clientY;
+        this.touchDragging = false;
+        this.pinchActive = false;
+        this.yawVelocity = 0; // stop any inertia glide while a finger is down
+      }
+    };
+    this.onTouchMove = (e) => {
+      e.preventDefault();
+      if (this.paused) return;
+      if (this.pinchActive && e.touches.length >= 2) {
+        // Map pinch-distance delta to the same boom-distance clamp as wheel:
+        // spreading fingers (distance grows) dollies IN (distance shrinks).
+        const dist = touchDistance(e);
+        const delta = dist - this.pinchPrevDist;
+        this.pinchPrevDist = dist;
+        this.targetDistance = pc.math.clamp(
+          this.targetDistance - delta * PINCH_ZOOM_SENSITIVITY,
+          DISTANCE_MIN,
+          DISTANCE_MAX,
+        );
+        this.idleTime = 0;
+        return;
+      }
+      if (e.touches.length === 1 && this.touchId !== null) {
+        const t = e.touches[0];
+        const dx = t.clientX - this.touchLastX;
+        const dy = t.clientY - this.touchLastY;
+        this.touchLastX = t.clientX;
+        this.touchLastY = t.clientY;
+        if (!this.touchDragging) {
+          const moved = Math.hypot(
+            t.clientX - this.touchStartX,
+            t.clientY - this.touchStartY,
+          );
+          if (moved < TOUCH_DRAG_THRESHOLD) return; // still a tap, don't orbit
+          this.touchDragging = true;
+        }
+        // Feed the same pending-delta accumulation the mouse drag uses; the
+        // update loop applies YAW/PITCH_SENSITIVITY + inertia identically.
+        this.pendingDX += dx * TOUCH_DRAG_SCALE;
+        this.pendingDY += dy * TOUCH_DRAG_SCALE;
+      }
+    };
+    this.onTouchEnd = (e) => {
+      if (this.paused) {
+        this.touchDragging = false;
+        this.pinchActive = false;
+        this.touchId = null;
+        return;
+      }
+      if (e.touches.length === 0) {
+        // All fingers up: end the drag (any built-up yawVelocity now glides).
+        this.touchDragging = false;
+        this.pinchActive = false;
+        this.touchId = null;
+      } else if (e.touches.length === 1) {
+        // Dropped from pinch back to one finger: restart single-drag tracking
+        // from the remaining finger so it doesn't jump.
+        this.pinchActive = false;
+        const t = e.touches[0];
+        this.touchId = t.identifier;
+        this.touchStartX = this.touchLastX = t.clientX;
+        this.touchStartY = this.touchLastY = t.clientY;
+        this.touchDragging = false;
+      }
+    };
+
     if (mouse) {
       // Suppress the browser context menu so right-drag/extra clicks never
       // interrupt the orbit interaction.
@@ -191,6 +324,15 @@ export class CameraRig {
       mouse.on(pc.EVENT_MOUSEMOVE, this.onMouseMove, this);
       mouse.on(pc.EVENT_MOUSEWHEEL, this.onMouseWheel, this);
     }
+
+    if (canvas) {
+      // `passive: false` so preventDefault is honoured and the page never
+      // scrolls / pinch-zooms while a gesture is driving the camera.
+      canvas.addEventListener("touchstart", this.onTouchStart, { passive: false });
+      canvas.addEventListener("touchmove", this.onTouchMove, { passive: false });
+      canvas.addEventListener("touchend", this.onTouchEnd);
+      canvas.addEventListener("touchcancel", this.onTouchEnd);
+    }
   }
 
   /** Attach the physics handle so the collision-avoidance ray can run. */
@@ -199,12 +341,35 @@ export class CameraRig {
   }
 
   /**
+   * Pause/resume orbit INPUT. While paused (a panel is open) drag, inertia and
+   * auto-recenter are suspended and any pending mouse delta is discarded, so the
+   * camera holds steady behind the panel; it still springs to its current
+   * targets so there is no popping when input resumes.
+   */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    if (paused) {
+      this.dragging = false;
+      this.touchDragging = false;
+      this.pinchActive = false;
+      this.touchId = null;
+      this.pendingDX = 0;
+      this.pendingDY = 0;
+      this.yawVelocity = 0;
+    }
+  }
+
+  /**
    * Advance the rig one frame. `target` is the player's feet position + travel
    * tangent yaw. Places + aims the camera entity.
    */
   update(dt: number, target: CameraTarget): void {
     // ---- Apply drag input / inertia / idle-recenter to the targets ------
-    if (this.dragging) {
+    if (this.paused) {
+      // Suspended while a panel is open: drop any queued input and hold.
+      this.pendingDX = 0;
+      this.pendingDY = 0;
+    } else if (this.dragging || this.touchDragging) {
       this.targetYaw = wrapAngle(this.targetYaw - this.pendingDX * YAW_SENSITIVITY);
       this.targetPitch = pc.math.clamp(
         this.targetPitch - this.pendingDY * PITCH_SENSITIVITY,
@@ -317,10 +482,17 @@ export class CameraRig {
 
   /** Remove all input listeners. Safe to call once during disposal. */
   destroy(): void {
-    if (!this.mouse) return;
-    this.mouse.off(pc.EVENT_MOUSEDOWN, this.onMouseDown, this);
-    this.mouse.off(pc.EVENT_MOUSEUP, this.onMouseUp, this);
-    this.mouse.off(pc.EVENT_MOUSEMOVE, this.onMouseMove, this);
-    this.mouse.off(pc.EVENT_MOUSEWHEEL, this.onMouseWheel, this);
+    if (this.mouse) {
+      this.mouse.off(pc.EVENT_MOUSEDOWN, this.onMouseDown, this);
+      this.mouse.off(pc.EVENT_MOUSEUP, this.onMouseUp, this);
+      this.mouse.off(pc.EVENT_MOUSEMOVE, this.onMouseMove, this);
+      this.mouse.off(pc.EVENT_MOUSEWHEEL, this.onMouseWheel, this);
+    }
+    if (this.canvas) {
+      this.canvas.removeEventListener("touchstart", this.onTouchStart);
+      this.canvas.removeEventListener("touchmove", this.onTouchMove);
+      this.canvas.removeEventListener("touchend", this.onTouchEnd);
+      this.canvas.removeEventListener("touchcancel", this.onTouchEnd);
+    }
   }
 }

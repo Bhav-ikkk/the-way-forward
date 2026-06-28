@@ -92,6 +92,14 @@ export interface LandmarkSpec {
   radius: number;
   /** Environment-integrated checkpoint accent light style. */
   marker: MarkerKind;
+  /**
+   * Radius (world units) of the KEEP-CLEAR apron around the structure anchor.
+   * Scatter/foliage/waypoint systems skip any placement falling inside this
+   * radius so the building reads with a clean ground apron and nothing
+   * intersects or crowds it. Sized to the structure's footprint + its own props
+   * (e.g. the workshop tent, the library's great tree) plus a small margin.
+   */
+  clearRadius: number;
 }
 
 /**
@@ -107,9 +115,118 @@ export interface LandmarkSpec {
  * the path length are the tunables to dial the discovery cadence.
  */
 export const LANDMARKS: readonly LandmarkSpec[] = [
-  { id: "workshop", t: 0.21, offset: 9, radius: 7, marker: "firepit" },
-  { id: "library", t: 0.42, offset: -9, radius: 7, marker: "lantern" },
-  { id: "ai-laboratory", t: 0.57, offset: 9, radius: 7, marker: "lantern" },
-  { id: "observatory", t: 0.72, offset: -10, radius: 7, marker: "lantern" },
-  { id: "lighthouse", t: 0.92, offset: 8, radius: 7.5, marker: "firepit" },
+  { id: "workshop", t: 0.21, offset: 9, radius: 7, marker: "firepit", clearRadius: 9.5 },
+  { id: "library", t: 0.42, offset: -9, radius: 7, marker: "lantern", clearRadius: 10 },
+  { id: "ai-laboratory", t: 0.57, offset: 9, radius: 7, marker: "lantern", clearRadius: 9 },
+  { id: "observatory", t: 0.72, offset: -10, radius: 7, marker: "lantern", clearRadius: 9 },
+  { id: "lighthouse", t: 0.92, offset: 8, radius: 7.5, marker: "firepit", clearRadius: 9 },
 ];
+
+/**
+ * Spawn-camp layout anchors (single source of truth, shared by {@link ./spawn}
+ * and the keep-clear computation below so the camp dressing, the arrival cabin,
+ * and the scatter exclusion all agree on WHERE the camp pieces sit).
+ */
+/** Path parameter at the heart of the spawn clearing (campfire + cabin anchor). */
+export const SPAWN_CLEARING_T = 0.05;
+/** Campfire offset from the clearing centre (camp heart). */
+export const SPAWN_FIRE_OFFSET = { x: -3.2, z: 1.5 } as const;
+/** Lateral offset (right of travel) of the arrival cabin from the clearing. */
+export const ARRIVAL_CABIN_OFFSET = 7.5;
+/** Keep-clear apron radius around the arrival cabin. */
+export const ARRIVAL_CABIN_CLEAR_RADIUS = 8;
+/** Keep-clear apron radius around the campfire/camp heart. */
+export const SPAWN_CAMP_CLEAR_RADIUS = 7.5;
+
+/**
+ * A circular ground exclusion zone around a structure anchor. Scatter and
+ * foliage systems skip any placement whose XZ position falls inside it, giving
+ * every building a clean apron of ground.
+ */
+export interface KeepClearZone {
+  /** Stable id (e.g. the chapter id, "arrival-camp", or "spawn-camp"). */
+  id: string;
+  /** Zone centre on the XZ ground plane. */
+  x: number;
+  z: number;
+  /** Exclusion radius (world units). */
+  radius: number;
+}
+
+/**
+ * The minimal path-sampling surface the keep-clear computation needs. Declared
+ * structurally so this DATA module stays free of any `playcanvas` import (the
+ * real {@link ./path Path} satisfies it).
+ */
+interface PathLike {
+  sample(t: number): {
+    position: { x: number; z: number };
+    tangent: { x: number; z: number };
+  };
+}
+
+/**
+ * Compute the shared list of keep-clear zones from the SAME path samples +
+ * offsets the structures are built from, so the exclusion can never drift out
+ * of sync with the buildings. Covers the five along-path chapter structures,
+ * the arrival cabin, and the campfire/camp heart.
+ *
+ * Consumed by {@link ./nature}, {@link ./waypoints}, {@link ./spawn} (camp
+ * foliage), and {@link ./river} (bank foliage) so no grass/bush/tree/rock/prop
+ * intersects or crowds a building.
+ */
+export function computeKeepClearZones(path: PathLike): KeepClearZone[] {
+  const zones: KeepClearZone[] = [];
+
+  // Five along-path chapter structures (anchor = path point + lateral offset).
+  for (const lm of LANDMARKS) {
+    const s = path.sample(lm.t);
+    const rightX = s.tangent.z;
+    const rightZ = -s.tangent.x;
+    zones.push({
+      id: lm.id,
+      x: s.position.x + rightX * lm.offset,
+      z: s.position.z + rightZ * lm.offset,
+      radius: lm.clearRadius,
+    });
+  }
+
+  // Arrival cabin off the spawn clearing's right shoulder + the camp heart.
+  const cs = path.sample(SPAWN_CLEARING_T);
+  const rightX = cs.tangent.z;
+  const rightZ = -cs.tangent.x;
+  zones.push({
+    id: "arrival-camp",
+    x: cs.position.x + rightX * ARRIVAL_CABIN_OFFSET,
+    z: cs.position.z + rightZ * ARRIVAL_CABIN_OFFSET,
+    radius: ARRIVAL_CABIN_CLEAR_RADIUS,
+  });
+  zones.push({
+    id: "spawn-camp",
+    x: cs.position.x + SPAWN_FIRE_OFFSET.x,
+    z: cs.position.z + SPAWN_FIRE_OFFSET.z,
+    radius: SPAWN_CAMP_CLEAR_RADIUS,
+  });
+
+  return zones;
+}
+
+/**
+ * True if XZ point (x,z) falls inside ANY keep-clear zone. Optionally exclude
+ * zones by id (e.g. the spawn camp's own foliage excludes the "spawn-camp"
+ * zone so it can still dress around its own fire).
+ */
+export function isInKeepClear(
+  x: number,
+  z: number,
+  zones: readonly KeepClearZone[],
+  excludeIds?: ReadonlySet<string>,
+): boolean {
+  for (const zone of zones) {
+    if (excludeIds?.has(zone.id)) continue;
+    const dx = x - zone.x;
+    const dz = z - zone.z;
+    if (dx * dx + dz * dz < zone.radius * zone.radius) return true;
+  }
+  return false;
+}

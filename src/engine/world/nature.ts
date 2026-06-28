@@ -1,7 +1,14 @@
 import type * as pc from "playcanvas";
 
 import type { Path } from "./path";
-import { BRIDGE_CROSSING_T, LANDMARKS, SPAWN_T } from "./landmarks";
+import {
+  BRIDGE_CROSSING_T,
+  computeKeepClearZones,
+  isInKeepClear,
+  type KeepClearZone,
+  LANDMARKS,
+  SPAWN_T,
+} from "./landmarks";
 import {
   hash01,
   LAYOUT,
@@ -106,9 +113,12 @@ export function buildNature(
   path: Path,
   colliders: ColliderSpec[],
 ): void {
-  buildTreeFraming(app, path, colliders);
-  buildRockFraming(app, path, colliders);
-  buildGroundDetail(app, path);
+  // Shared keep-clear apron around every building, computed from the same path
+  // samples/offsets the structures use, so no scatter crowds a structure.
+  const keepClear = computeKeepClearZones(path);
+  buildTreeFraming(app, path, colliders, keepClear);
+  buildRockFraming(app, path, colliders, keepClear);
+  buildGroundDetail(app, path, keepClear);
 }
 
 /**
@@ -119,13 +129,14 @@ function buildTreeFraming(
   app: pc.AppBase,
   path: Path,
   colliders: ColliderSpec[],
+  keepClear: readonly KeepClearZone[],
 ): void {
   const shoulder = LAYOUT.path.width / 2 + LAYOUT.path.shoulder; // ~2.8
   // Stations + tree budget scale with the path length so the longer pass-2
   // ribbon stays framed end-to-end (no bare stretches).
   const length = path.length();
   const STATIONS = Math.max(50, Math.round(length / 2.5));
-  const MAX_TREES = Math.round(length * 0.6);
+  const MAX_TREES = Math.round(length * 0.5);
 
   // One placement bucket per tree URL (so a single load fans out to N clones).
   const buckets = new Map<string, Placement[]>();
@@ -146,8 +157,10 @@ function buildTreeFraming(
     const rightX = s.tangent.z;
     const rightZ = -s.tangent.x;
 
-    // Composition density: always some framing, swelling on bends + near POIs.
-    const density = 0.35 + 0.4 * poiProximity(t) + 0.5 * Math.min(1, turnAmount(path, t));
+    // Composition density: a quiet baseline on the straights, swelling on
+    // bends (to mask/reveal what's around the curve) and near points of
+    // interest (to frame the structures). Deliberate clusters, not a sprinkle.
+    const density = 0.26 + 0.5 * poiProximity(t) + 0.6 * Math.min(1, turnAmount(path, t));
 
     for (const side of [1, -1] as const) {
       // Deterministic per-station-per-side dice.
@@ -171,6 +184,9 @@ function buildTreeFraming(
         const along = (c - (clusterN - 1) / 2) * (1.7 + h3 * 1.4);
         const x = s.position.x + rightX * offset * side + s.tangent.x * along;
         const z = s.position.z + rightZ * offset * side + s.tangent.z * along;
+
+        // Skip anything that would crowd a building's clean apron.
+        if (isInKeepClear(x, z, keepClear)) continue;
 
         // Pick a silhouette: tall pines favoured deep, oaks/pines near; the
         // accent tree appears only rarely and only in the far band.
@@ -208,6 +224,7 @@ function buildRockFraming(
   app: pc.AppBase,
   path: Path,
   colliders: ColliderSpec[],
+  keepClear: readonly KeepClearZone[],
 ): void {
   const shoulder = LAYOUT.path.width / 2 + LAYOUT.path.shoulder;
   const length = path.length();
@@ -243,6 +260,8 @@ function buildRockFraming(
     const offset = shoulder + 1.0 + h2 * 2.5;
     const x = s.position.x + rightX * offset * side;
     const z = s.position.z + rightZ * offset * side;
+    // Skip rocks that would crowd a building's clean apron.
+    if (isInKeepClear(x, z, keepClear)) continue;
     const scale = kind.minScale + h * (kind.maxScale - kind.minScale);
     const yaw = hash01(i * 3.3) * 360;
 
@@ -272,7 +291,11 @@ function buildRockFraming(
  * corridor in tasteful clusters — denser at clearings + points of interest,
  * sparse on the long straights. Purely decorative: no colliders.
  */
-function buildGroundDetail(app: pc.AppBase, path: Path): void {
+function buildGroundDetail(
+  app: pc.AppBase,
+  path: Path,
+  keepClear: readonly KeepClearZone[],
+): void {
   const { nearOffset, farOffset, stations } = LAYOUT.decor;
 
   const grass: Placement[] = [];
@@ -282,7 +305,7 @@ function buildGroundDetail(app: pc.AppBase, path: Path): void {
   const flowerYellow: Placement[] = [];
   const mushroom: Placement[] = [];
 
-  const MAX_DETAIL = Math.round(path.length() * 1.2);
+  const MAX_DETAIL = Math.round(path.length() * 0.9);
   let placed = 0;
 
   for (let i = 1; i < stations && placed < MAX_DETAIL; i++) {
@@ -294,8 +317,9 @@ function buildGroundDetail(app: pc.AppBase, path: Path): void {
     const rightX = s.tangent.z;
     const rightZ = -s.tangent.x;
 
-    // Lusher near points of interest, sparse on straights.
-    const lush = 0.25 + 0.75 * poiProximity(t);
+    // Lusher near points of interest (clearings/structures), restrained on the
+    // long straights so the detail reads as tended clusters, not noise.
+    const lush = 0.18 + 0.8 * poiProximity(t);
 
     for (const side of [1, -1] as const) {
       const seed = i * 2 + (side === 1 ? 0 : 1);
@@ -311,6 +335,8 @@ function buildGroundDetail(app: pc.AppBase, path: Path): void {
         const along = (h2 - 0.5) * 3.0;
         const x = s.position.x + rightX * offset * side + s.tangent.x * along;
         const z = s.position.z + rightZ * offset * side + s.tangent.z * along;
+        // Skip ground detail that would clutter a building's clean apron.
+        if (isInKeepClear(x, z, keepClear)) continue;
         const yaw = h3 * 360;
         const scale = 0.9 + h * 0.7;
 

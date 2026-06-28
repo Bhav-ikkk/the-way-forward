@@ -30,6 +30,39 @@ export interface Checkpoint {
 }
 
 /**
+ * Engine-agnostic info about the active interactable surfaced to the HUD so the
+ * App_Framework can show an "enter" affordance and open the right info panel.
+ */
+export interface InteractableInfo {
+  /** Stable chapter id (matches `content/chapters.json`). */
+  id: string;
+  /** Human-readable chapter title (sourced from content). */
+  title: string;
+}
+
+/**
+ * A chapter structure the player can approach + enter. Built alongside the
+ * structure's geometry; the controller finds the nearest one within its
+ * approach radius, highlights it, and fires "enter" against its id.
+ */
+export interface Interactable {
+  /** Stable chapter id (matches `content/chapters.json`). */
+  id: string;
+  /** Chapter title (from content) shown in the enter prompt. */
+  title: string;
+  /** Approach centre on/near the path (world space). */
+  position: pc.Vec3;
+  /** Approach radius (world units) the player must be within. */
+  radius: number;
+  /**
+   * Drive the building's subtle highlight. `factor` is 0 (idle) → 1 (fully
+   * highlighted); the structure ramps its accent light + ground glow ring to
+   * match. The controller eases the factor so the highlight fades in/out.
+   */
+  setHighlight: (factor: number) => void;
+}
+
+/**
  * The NPC welcome shown on first load (and re-triggered by proximity to the
  * greeter). Engine-agnostic plain data so the HUD never imports `playcanvas`.
  */

@@ -37,11 +37,22 @@ vi.mock("playcanvas", () => {
   // used while building the handcrafted world.
   class Entity {
     name: unknown;
+    enabled = true;
     constructor(name?: unknown) {
       this.name = name;
     }
-    addComponent() {
-      return {};
+    addComponent(type?: unknown) {
+      // Assign the component to `this[type]` like the real engine does, and
+      // give the camera component the screen-projection method the new
+      // InteractionController uses for the floating nameplate.
+      const comp =
+        type === "camera"
+          ? { worldToScreen: (_w: unknown, s?: Vec3) => s ?? new Vec3() }
+          : {};
+      if (typeof type === "string") {
+        (this as Record<string, unknown>)[type] = comp;
+      }
+      return comp;
     }
     addChild() {}
     setLocalPosition() {}
@@ -51,6 +62,12 @@ vi.mock("playcanvas", () => {
     lookAt() {}
     getLocalPosition() {
       return { x: 0, y: 0, z: 0 };
+    }
+    getPosition() {
+      return new Vec3(0, 0, 0);
+    }
+    get forward() {
+      return new Vec3(0, 0, 1);
     }
   }
 
@@ -73,6 +90,12 @@ vi.mock("playcanvas", () => {
       this.x = x;
       this.y = y;
       this.z = z;
+    }
+    set(x = 0, y = 0, z = 0) {
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      return this;
     }
   }
 

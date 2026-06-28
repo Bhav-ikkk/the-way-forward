@@ -1,7 +1,12 @@
 import * as pc from "playcanvas";
 
 import type { Path } from "./path";
-import { BRIDGE_CROSSING_T } from "./landmarks";
+import {
+  BRIDGE_CROSSING_T,
+  computeKeepClearZones,
+  isInKeepClear,
+  type KeepClearZone,
+} from "./landmarks";
 import {
   addPointLight,
   LAYOUT,
@@ -69,8 +74,11 @@ export function buildWaypoints(
   beats: IncidentalBeat[],
 ): void {
   const beatsById = new Map(beats.map((b) => [b.id, b]));
-  buildSignposts(app, path, checkpoints, markers, beatsById);
-  buildRuins(app, path, colliders);
+  // Same shared keep-clear apron the scatter uses, so ruins/signposts never
+  // intersect a building either.
+  const keepClear = computeKeepClearZones(path);
+  buildSignposts(app, path, checkpoints, markers, beatsById, keepClear);
+  buildRuins(app, path, colliders, keepClear);
 }
 
 /** Place the content-bound signposts + their proximity checkpoints. */
@@ -80,6 +88,7 @@ function buildSignposts(
   checkpoints: Checkpoint[],
   markers: Marker[],
   beatsById: Map<string, IncidentalBeat>,
+  keepClear: readonly KeepClearZone[],
 ): void {
   const signs: Placement[] = [];
   for (const sp of SIGNPOSTS) {
@@ -88,6 +97,9 @@ function buildSignposts(
     const rightZ = -s.tangent.x;
     const x = s.position.x + rightX * sp.offset;
     const z = s.position.z + rightZ * sp.offset;
+    // Skip a signpost that would stand inside a building's clean apron (its
+    // checkpoint beat is dropped with it to avoid a phantom trigger).
+    if (isInKeepClear(x, z, keepClear)) continue;
     const faceYaw = yawFromDir(s.tangent.x, s.tangent.z);
     signs.push({ position: [x, 0, z], yaw: faceYaw + 180, scale: 1.6 });
 
@@ -130,7 +142,12 @@ function buildSignposts(
  * couple of rocks, with one simple collider per ruin. Pure set dressing that
  * keeps the route interesting between the chapter structures.
  */
-function buildRuins(app: pc.AppBase, path: Path, colliders: ColliderSpec[]): void {
+function buildRuins(
+  app: pc.AppBase,
+  path: Path,
+  colliders: ColliderSpec[],
+  keepClear: readonly KeepClearZone[],
+): void {
   const walls: Placement[] = [];
   const columns: Placement[] = [];
   const rocks: Placement[] = [];
@@ -142,6 +159,8 @@ function buildRuins(app: pc.AppBase, path: Path, colliders: ColliderSpec[]): voi
     const rightZ = -s.tangent.x;
     const x = s.position.x + rightX * r.offset;
     const z = s.position.z + rightZ * r.offset;
+    // Skip a ruin set-piece (and its collider) inside a building's apron.
+    if (isInKeepClear(x, z, keepClear)) continue;
     const faceYaw = yawFromDir(s.tangent.x, s.tangent.z);
 
     walls.push({ position: [x, 0, z], yaw: faceYaw + 90, scale: 2.2 });

@@ -1,7 +1,13 @@
 import type * as pc from "playcanvas";
 
 import { createPath, type Path, type PathSample } from "./path";
-import { BRIDGE_CROSSING_T, RIVER_CONTROL_POINTS } from "./landmarks";
+import {
+  BRIDGE_CROSSING_T,
+  computeKeepClearZones,
+  isInKeepClear,
+  type KeepClearZone,
+  RIVER_CONTROL_POINTS,
+} from "./landmarks";
 import {
   addPointLight,
   LAYOUT,
@@ -65,7 +71,11 @@ export function buildRiver(
   );
 
   // ---- Bridge at the crossing (oriented along the path tangent) ----------
-  const bridgeYaw = yawFromDir(crossing.tangent.x, crossing.tangent.z);
+  // Deck flush + centred on the path, oriented exactly to the path tangent so
+  // the crossing reads as natural. Width matches the corridor; the deck spans
+  // the river with planks meeting the path on both banks.
+  const bridgeYaw =
+    yawFromDir(crossing.tangent.x, crossing.tangent.z) + LAYOUT.bridge.yawOffset;
   loadModel(app, LAYOUT.bridge.url, (root) => {
     root.setLocalPosition(
       crossing.position.x,
@@ -76,19 +86,21 @@ export function buildRiver(
     root.setLocalScale(LAYOUT.bridge.scale, LAYOUT.bridge.scale, LAYOUT.bridge.scale);
   });
 
-  // Walkable bridge deck spanning the full corridor width at the crossing.
+  // Walkable bridge deck spanning the full corridor width at the crossing. The
+  // depth reuses LAYOUT.bridge.halfDepth so the collider matches the model deck
+  // (visuals + physics stay in sync) and lands on the banks, not the water.
   const deckHalfWidth = LAYOUT.path.width / 2 + LAYOUT.path.shoulder;
   colliders.push({
     id: "bridge-deck",
     type: "box",
     position: [crossing.position.x, 0.4, crossing.position.z],
-    halfExtents: [deckHalfWidth, 0.4, 4.2],
+    halfExtents: [deckHalfWidth, 0.4, LAYOUT.bridge.halfDepth],
     rotation: [0, bridgeYaw, 0],
     role: "bridge",
   });
 
   // ---- Crossing dressing (banks + lilies + end lanterns) -----------------
-  dressCrossing(app, river, crossing, colliders);
+  dressCrossing(app, river, crossing, colliders, computeKeepClearZones(path));
 
   return { river, crossing };
 }
@@ -107,6 +119,7 @@ function dressCrossing(
   river: Path,
   crossing: PathSample,
   colliders: ColliderSpec[],
+  keepClear: readonly KeepClearZone[],
 ): void {
   const cx = crossing.position.x;
   const cz = crossing.position.z;
@@ -118,7 +131,7 @@ function dressCrossing(
   const yaw = yawFromDir(fX, fZ);
 
   const deckHalf = LAYOUT.path.width / 2 + LAYOUT.path.shoulder; // ~2.8
-  const endDist = 4.6; // just past the deck, where the bank meets the path
+  const endDist = LAYOUT.bridge.halfDepth + 0.4; // just past the deck end, on the bank
   const laneOff = LAYOUT.path.width / 2 + 0.9; // shoulder line for lanterns
 
   // ---- Lanterns at both ends (4 models; one warm pool of light per end) --
@@ -183,6 +196,31 @@ function dressCrossing(
   loadModelInstances(app, "/models/rock_small.glb", rockSmall);
   loadModelInstances(app, "/models/stone_small.glb", stones);
 
+  // ---- Low stone embankment tidying the path↔water bank seam -------------
+  // A tight line of flattened stones laid along each bank's water edge,
+  // flanking the deck, so the seam where the path meets the water reads as a
+  // tended stone embankment rather than a hard line. Laid at the water surface
+  // so nothing floats. Pure dressing (no colliders).
+  const embankment: Placement[] = [];
+  const bankAlong = LAYOUT.river.width / 2 - 0.1; // ~3.4, right at the water edge
+  for (const end of [1, -1] as const) {
+    for (let s = 0; s < 5; s++) {
+      // Lateral positions hugging the deck edge and tumbling outward to frame
+      // the crossing; skip the span the opaque deck already covers.
+      const lat = deckHalf - 0.3 + s * 0.95; // ~2.5 .. 6.3 from centre
+      for (const side of [1, -1] as const) {
+        const ex = cx + fX * bankAlong * end + rX * lat * side;
+        const ez = cz + fZ * bankAlong * end + rZ * lat * side;
+        embankment.push({
+          position: [ex, LAYOUT.river.y, ez],
+          yaw: (yaw + end * 37 + s * 21 + (side > 0 ? 0 : 90)) % 360,
+          scale: [1.5 - s * 0.12, 0.45, 1.1],
+        });
+      }
+    }
+  }
+  loadModelInstances(app, "/models/stone_small.glb", embankment);
+
   // ---- Bank foliage softening the approaches (decorative) ---------------
   const bushes: Placement[] = [];
   const grass: Placement[] = [];
@@ -194,6 +232,9 @@ function dressCrossing(
     const lat = deckHalf + 1.6 + ((k * 0.37) % 1) * 2.0;
     const x = cx + fX * a * end + rX * lat * side;
     const z = cz + fZ * a * end + rZ * lat * side;
+    // Respect the shared keep-clear apron so bank foliage never crowds a
+    // nearby structure.
+    if (isInKeepClear(x, z, keepClear)) continue;
     const yawK = (k * 47) % 360;
     if (k % 4 === 0) bushes.push({ position: [x, 0, z], yaw: yawK, scale: 1.2 });
     else if (k % 4 === 1) flowers.push({ position: [x, 0, z], yaw: yawK, scale: 1.1 });

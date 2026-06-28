@@ -55,15 +55,44 @@ export const LAYOUT = {
   river: {
     width: 7,
     thickness: 0.06,
-    y: 0.05,
+    /**
+     * River surface height. Kept just above the ground plane (so it reads as
+     * water on the meadow) but BELOW the path strip top (~0.07) and the bridge
+     * deck, so the water clearly passes under the crossing without z-fighting
+     * the tan path where the two overlap beneath the deck.
+     */
+    y: 0.04,
     color: [0.18, 0.42, 0.78] as const,
     opacity: 0.78,
     segments: 48,
   },
   bridge: {
     url: "/models/bridge.glb",
-    scale: 4,
-    y: 0.05,
+    /**
+     * Bridge model scale. Tuned so the deck spans the full walkable corridor
+     * (path width + both shoulders ≈ 5.6u) and the planks land on solid ground
+     * on both banks rather than floating over the water.
+     */
+    scale: 4.2,
+    /**
+     * Deck height. Sits just above BOTH the river surface (river.y) and the
+     * path strip (top ≈0.07) so the opaque deck reads cleanly on top while the
+     * water passes UNDER it — no z-fighting at the deck/water/path seams.
+     */
+    y: 0.12,
+    /**
+     * Yaw offset (deg) added on top of the path tangent so the model's long
+     * axis lies ALONG the corridor. The Kenney bridge already points down its
+     * +Z (matching the path tangent), so this stays 0; exposed for tuning.
+     */
+    yawOffset: 0,
+    /**
+     * Half-depth (along travel) of the walkable deck. Exceeds the river
+     * half-width (~3.5u) so the plank ends meet the path on both banks with no
+     * gap/float; the deck collider reuses this so visuals + physics stay in
+     * sync.
+     */
+    halfDepth: 4.2,
   },
   character: {
     url: "/models/character.glb",
@@ -220,10 +249,10 @@ export function makeMaterial(
   return mat;
 }
 
-/** Add a primitive box/plane/sphere entity to the scene. */
+/** Add a primitive box/plane/sphere/cylinder entity to the scene. */
 export function addPrimitive(
   app: pc.AppBase,
-  type: "box" | "plane" | "sphere",
+  type: "box" | "plane" | "sphere" | "cylinder",
   material: pc.StandardMaterial,
   position: readonly [number, number, number],
   scale: readonly [number, number, number],

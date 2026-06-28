@@ -1,12 +1,12 @@
 {
-  "name": "Dev Demoson",
-  "title": "Full-Stack Developer & Interactive Experience Builder",
-  "tagline": "Turning ideas into explorable worlds.",
-  "bio": "Dev Demoson is a fictional demonstration developer who builds playful, data-driven web experiences. This profile is sample content shipped to show how the Portfolio World Engine populates its handcrafted scenes.",
+  "name": "Bhavik Joshi",
+  "title": "Software Developer",
+  "tagline": "Building thoughtful software, one idea at a time.",
+  "bio": "Bhavik Joshi is a Software Developer and Computer Science student at Chhavi Devi Group of Institutions. He enjoys turning ideas into clean, dependable software and learning by building real things end to end.",
   "avatarAssetId": "character.male.a",
-  "knowledgeSummary": "Comfortable across the modern web stack — TypeScript, React, and Next.js on the front end, Node services and SQL/NoSQL data stores on the back end, plus real-time 3D in the browser with WebGL engines.",
-  "workSummary": "Has shipped interactive portfolio worlds, a collaborative whiteboard, and a small fleet of developer tools, always favouring clear architecture and swappable, data-driven content.",
-  "thinkingApproach": "Starts from the story a system needs to tell, decomposes it into independently replaceable parts, and validates assumptions early with small, testable slices before scaling up.",
-  "futureDirection": "Exploring AI-assisted authoring tooling and richer handcrafted scenes so non-developers can populate immersive portfolios by editing plain data files.",
-  "collaborationValue": "Brings calm, pragmatic delivery: communicates trade-offs plainly, keeps systems simple enough to hand off, and leaves documentation a teammate can actually follow."
+  "knowledgeSummary": "Comfortable across the modern web stack — TypeScript, React, and Next.js on the front end, with Node.js services and SQL/NoSQL data stores on the back end, plus a growing interest in real-time 3D in the browser.",
+  "workSummary": "Builds web applications and developer tools end to end, favouring clear architecture, readable code, and content that is easy to change without rewriting the system.",
+  "thinkingApproach": "Starts from the problem the software needs to solve, breaks it into small replaceable parts, and validates ideas early with simple, testable slices before scaling them up.",
+  "futureDirection": "Growing into a well-rounded software engineer — going deeper on systems design and AI-assisted tooling while shipping projects that people actually use.",
+  "collaborationValue": "Reliable and easy to work with: communicates clearly, keeps things simple enough to hand off, and cares about leaving documentation a teammate can actually follow."
 }

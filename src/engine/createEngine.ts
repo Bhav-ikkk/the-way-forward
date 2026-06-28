@@ -2,8 +2,13 @@ import * as pc from "playcanvas";
 
 import { buildWorld } from "./world/buildWorld";
 import { CharacterController } from "./CharacterController";
+import type { NameplateScreen } from "./InteractionController";
 import { createPhysics, type Physics } from "./physics";
-import type { CheckpointInfo, WelcomeInfo } from "./world/types";
+import type {
+  CheckpointInfo,
+  InteractableInfo,
+  WelcomeInfo,
+} from "./world/types";
 
 /**
  * Callback invoked whenever the character enters or leaves a checkpoint
@@ -21,6 +26,18 @@ export interface CreateEngineOptions {
   /** Fired once (after load) with the NPC greeter's welcome copy. */
   onWelcome?: (welcome: WelcomeInfo) => void;
   /**
+   * Fired when the nearest approachable structure changes (or clears). The HUD
+   * uses this to show an "enter" affordance for the active building.
+   */
+  onInteractableChange?: (info: InteractableInfo | null) => void;
+  /**
+   * Fired when the player "enters" the active structure (E key or a tap that is
+   * not a camera drag). Does NOT change the scene — the HUD opens an info panel.
+   */
+  onEnter?: (id: string) => void;
+  /** Fired each frame with the floating nameplate's screen placement. */
+  onNameplate?: (nameplate: NameplateScreen) => void;
+  /**
    * Enable the Rapier physics world (character movement + static world
    * collision). Defaults to `true`. Set `false` to run a pure-transform engine
    * (used by unit tests so WASM/physics never loads).
@@ -34,10 +51,20 @@ export interface CreateEngineOptions {
  * - `app` is the live PlayCanvas application instance (Requirement 7.5).
  * - `dispose()` destroys the instance and releases GPU/engine resources
  *   (Requirement 7.3). It is safe to call more than once.
+ * - `setInputPaused()` freezes/unfreezes player movement + camera orbit + enter
+ *   input (called by the HUD when an info panel opens/closes).
  */
 export interface EngineHandle {
   app: pc.AppBase;
   dispose: () => void;
+  setInputPaused: (paused: boolean) => void;
+  /**
+   * Drive on-rails movement from the UI (mobile hold-to-walk control). `drive`
+   * is in [-1, 1] (+1 forward, -1 back, 0 idle) and is blended with the
+   * keyboard by the {@link CharacterController}. No-op until the character has
+   * spawned; the latest value is applied as soon as the controller exists.
+   */
+  setMoveInput: (drive: number) => void;
 }
 
 /**
@@ -95,6 +122,13 @@ export function createEngine(
   let character: pc.Entity | null = null;
   let capsuleSpawned = false;
   let disposed = false;
+  // Whether player movement + camera orbit + enter-input are frozen (a panel is
+  // open). Tracked here because the controller is created asynchronously once
+  // the character loads; the latest value is applied as soon as it exists.
+  let inputPaused = false;
+  // Latest UI movement drive (mobile hold-to-walk), applied to the controller
+  // as soon as it spawns and on every change thereafter.
+  let moveInput = 0;
 
   const enablePhysics = options.enablePhysics ?? true;
 
@@ -116,7 +150,17 @@ export function createEngine(
       path: world.path,
       initialDistance: world.spawnDistance,
       mouse: app.mouse,
+      canvas,
+      interaction: {
+        interactables: world.interactables,
+        onInteractableChange: options.onInteractableChange,
+        onEnter: options.onEnter,
+        onNameplate: options.onNameplate,
+        canvas,
+      },
     });
+    controller.setPaused(inputPaused);
+    controller.setMoveInput(moveInput);
     linkPhysicsToCharacter();
   });
 
@@ -151,5 +195,19 @@ export function createEngine(
     app.destroy(); // releases GPU/engine resources (Req 7.3)
   };
 
-  return { app, dispose };
+  // Freeze/unfreeze input from the App_Framework (called when a panel opens or
+  // closes). Stored so it applies even if the controller hasn't spawned yet.
+  const setInputPaused = (paused: boolean) => {
+    inputPaused = paused;
+    controller?.setPaused(paused);
+  };
+
+  // Drive on-rails movement from the UI (mobile hold-to-walk). Stored so it
+  // applies even if the controller hasn't spawned yet.
+  const setMoveInput = (drive: number) => {
+    moveInput = drive;
+    controller?.setMoveInput(drive);
+  };
+
+  return { app, dispose, setInputPaused, setMoveInput };
 }
