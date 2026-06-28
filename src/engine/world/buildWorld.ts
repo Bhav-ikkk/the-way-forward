@@ -1,15 +1,18 @@
 import * as pc from "playcanvas";
 
-import profile from "../../../content/profile.json";
-import { createPath } from "./path";
-import { LANDMARKS, PATH_CONTROL_POINTS, WELCOME } from "./landmarks";
+import chapters from "../../../content/chapters.json";
+import dialogues from "../../../content/dialogues.json";
+import { createPath, type Path } from "./path";
+import { LANDMARKS, PATH_CONTROL_POINTS, SPAWN_T } from "./landmarks";
 import { buildLighting } from "./lighting";
+import { buildAtmosphere } from "./atmosphere";
 import { buildTerrain } from "./terrain";
 import { buildRoad } from "./road";
 import { buildRiver } from "./river";
 import { buildSpawn } from "./spawn";
 import { buildNature } from "./nature";
 import { type Marker, placeLandmark, stepMarkers } from "./checkpoint";
+import { buildWaypoints } from "./waypoints";
 import { buildNpc } from "./npc";
 import { LAYOUT, loadModel } from "./shared";
 import type {
@@ -41,6 +44,10 @@ export interface World {
   colliders: ColliderSpec[];
   /** Initial facing (degrees) for the player, down the path. */
   spawnYaw: number;
+  /** The journey path spline the player rides along (on-rails movement). */
+  path: Path;
+  /** Starting distance `s` (world units) along the path for the spawn point. */
+  spawnDistance: number;
   /** Register a callback fired once the character entity is in the scene. */
   onCharacterReady: (cb: (character: pc.Entity) => void) => void;
   /** Tear down world-owned update handlers. */
@@ -49,17 +56,18 @@ export interface World {
 
 /**
  * Thin orchestrator for the handcrafted narrative vertical slice. It owns the
- * shared placement truth (the path spline + welcome copy) and the camera, then
- * delegates to cohesive world systems that each build one concern:
+ * shared placement truth (the path spline) and the camera, then delegates to
+ * cohesive world systems that each build one concern:
  *
  * - {@link buildLighting} — sun + ambient.
  * - {@link buildTerrain}  — flat corridor ground + gentle framing hills.
  * - {@link buildRiver}    — river strip + bridge + bridge-deck collider.
  * - {@link buildRoad}     — path strip + lanterns + confinement-wall colliders.
  * - {@link buildSpawn}    — cozy spawn camp + campfire light.
- * - {@link buildNpc}      — Wren greeter + welcome checkpoint.
+ * - {@link buildNpc}      — greeter NPC + welcome checkpoint (copy from content).
  * - {@link buildNature}   — scattered trees/rocks (each with a prop collider).
- * - {@link placeLandmark} — the four narrative landmarks + checkpoints/markers.
+ * - {@link placeLandmark} — the narrative landmark placements + checkpoints,
+ *   with all titles/dialogue sourced from content/chapters.json.
  *
  * It aggregates every system's checkpoints + collider specs onto the returned
  * {@link World} handle, and runs the shared marker flicker animation. No physics
@@ -70,14 +78,16 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
   const colliders: ColliderSpec[] = [];
   const markers: Marker[] = [];
 
-  // Welcome copy, lightly personalised with the developer name from profile
-  // data (the rest of the copy is authored placeholder text).
+  // All narrative copy is sourced from content/chapters.json, matched to engine
+  // placements by chapter id. The engine itself holds no human-readable copy.
+  const chaptersById = new Map(chapters.map((c) => [c.id, c]));
+
+  // NPC greeter welcome copy comes entirely from the Arrival Camp chapter's
+  // dialogue (speaker + lines) — authored in content, not the engine.
+  const arrival = chaptersById.get("arrival-camp");
   const welcome: WelcomeInfo = {
-    speaker: WELCOME.speaker,
-    lines: [
-      `Welcome, traveller — this is ${profile.name}'s world.`,
-      ...WELCOME.lines.slice(1),
-    ],
+    speaker: arrival?.dialogue.speaker ?? "",
+    lines: arrival?.dialogue.lines ?? [],
   };
 
   // ---- Shared placement truth: the journey path spline -------------------
@@ -97,13 +107,38 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
   });
   buildNature(app, path, colliders);
   for (const lm of LANDMARKS) {
-    placeLandmark(app, path, lm, checkpoints, colliders, markers);
+    // Source each landmark's title/dialogue from its matching chapter content.
+    const chapter = chaptersById.get(lm.id);
+    if (!chapter) continue;
+    placeLandmark(
+      app,
+      path,
+      lm,
+      {
+        speaker: chapter.title,
+        line: chapter.dialogue.lines[0] ?? "",
+        lines: chapter.dialogue.lines,
+      },
+      checkpoints,
+      colliders,
+      markers,
+    );
   }
+
+  // Incidental signposts (content-sourced beats) + ruins dressing the gaps
+  // between chapters so the longer route is never empty terrain.
+  buildWaypoints(app, path, checkpoints, colliders, markers, dialogues);
 
   // ---- Camera (follow camera; positioned each frame by the controller) ---
   const camera = new pc.Entity("camera");
   camera.addComponent("camera", {
-    clearColor: new pc.Color(0.53, 0.81, 0.92), // sky blue
+    // Matched to the atmosphere haze so the horizon blends seamlessly; the
+    // atmosphere system re-asserts this plus tone mapping/exposure below.
+    clearColor: new pc.Color(
+      LAYOUT.atmosphere.horizonColor[0],
+      LAYOUT.atmosphere.horizonColor[1],
+      LAYOUT.atmosphere.horizonColor[2],
+    ),
     fov: 58,
     nearClip: 0.1,
     farClip: 1000,
@@ -111,6 +146,9 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
   camera.setLocalPosition(0, 7, -10);
   camera.lookAt(0, 1, 0);
   app.root.addChild(camera);
+
+  // ---- Atmosphere (fog + filmic grading; matched to the camera horizon) --
+  buildAtmosphere(app, camera);
 
   // ---- Character ---------------------------------------------------------
   const characterReadyCbs: Array<(character: pc.Entity) => void> = [];
@@ -160,6 +198,8 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
     checkpoints,
     colliders,
     spawnYaw: camp.spawnYaw,
+    path,
+    spawnDistance: path.distanceForT(SPAWN_T),
     onCharacterReady: (cb) => {
       if (character) cb(character);
       else characterReadyCbs.push(cb);
