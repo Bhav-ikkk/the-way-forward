@@ -2,11 +2,15 @@ import type * as pc from "playcanvas";
 
 import type { Path } from "./path";
 import { SPAWN_T } from "./landmarks";
-import type { Marker } from "./checkpoint";
+import type { Marker } from "./shared";
+import { buildArrivalCabin, type StructureFrame } from "./structures";
 import {
   addPointLight,
+  hash01,
   LAYOUT,
   loadModel,
+  loadModelInstances,
+  type Placement,
   type ScenerySpec,
   yawFromDir,
 } from "./shared";
@@ -25,10 +29,17 @@ export interface SpawnResult {
 }
 
 /**
- * Spawn system: the cozy spawn camp at the start of the journey — a campfire
- * with a warm always-on glow, benches around it, framing trees/rocks, and a
- * sign. The framing trees/rocks emit `"prop"` collider specs so the player
- * bumps into them. The campfire's animated point light is registered as a
+ * Spawn system: the cozy, lived-in "Arrival" camp at the start of the journey.
+ *
+ * A campfire with a warm always-on glow sits at the heart of it, ringed by
+ * benches, logs, and a circle of hearth stones. Framing trees/rocks anchor the
+ * clearing, two lit lanterns mark the way out onto the path, a low fence guides
+ * the eye toward the road, and tufts of grass / flowers / a mushroom or two
+ * dress the ground so the camp feels inhabited rather than staged.
+ *
+ * Solid set pieces the player can brush (trees, rocks, logs, fence line) emit
+ * `"prop"` collider specs; the hearth stones and ground foliage are decorative
+ * and carry none. The campfire's animated point light is registered as a
  * firepit {@link Marker} so it flickers like the checkpoint markers.
  */
 export function buildSpawn(
@@ -62,20 +73,35 @@ export function buildSpawn(
     phase: 0.7,
   });
 
-  // ---- Benches around the fire ------------------------------------------
+  // ---- Hearth stone ring grounding the fire (decorative, no colliders) ---
+  const hearth: Placement[] = [];
+  const ringN = 7;
+  for (let i = 0; i < ringN; i++) {
+    const a = (i / ringN) * Math.PI * 2;
+    hearth.push({
+      position: [fireX + Math.cos(a) * 1.5, 0, fireZ + Math.sin(a) * 1.5],
+      yaw: (a * 180) / Math.PI,
+      scale: 0.9 + hash01(i * 3.1) * 0.5,
+    });
+  }
+  loadModelInstances(app, "/models/stone_small.glb", hearth);
+
+  // ---- Benches + logs as seating around the fire -------------------------
   const benches: ScenerySpec[] = [
     { url: "/models/bench.glb", position: [fireX + 2.6, 0, fireZ], yaw: 270, scale: 1.6 },
-    { url: "/models/bench.glb", position: [fireX - 2.6, 0, fireZ - 0.4], yaw: 90, scale: 1.6 },
     { url: "/models/bench.glb", position: [fireX, 0, fireZ - 2.6], yaw: 0, scale: 1.6 },
   ];
 
-  // ---- Framing trees / rocks / sign (trees + rocks get prop colliders) ---
+  // ---- Framing trees / rocks / logs / sign (solid pieces get colliders) --
   const framing: Array<ScenerySpec & { collider?: [number, number, number] }> = [
     { url: "/models/tree_oak.glb", position: [fireX - 6, 0, fireZ - 4], yaw: 20, scale: 2.6, collider: [0.4, 2.5, 0.4] },
     { url: "/models/tree_pine.glb", position: [fireX + 6, 0, fireZ - 5], yaw: 200, scale: 3.0, collider: [0.4, 3, 0.4] },
     { url: "/models/tree_oak.glb", position: [fireX + 7, 0, fireZ + 4], yaw: 120, scale: 2.4, collider: [0.4, 2.4, 0.4] },
     { url: "/models/rock_large.glb", position: [fireX - 5, 0, fireZ + 3], yaw: 0, scale: 1.8, collider: [0.9, 0.7, 0.9] },
     { url: "/models/rock_small.glb", position: [fireX + 4, 0, fireZ + 2.5], yaw: 60, scale: 1.6, collider: [0.6, 0.5, 0.6] },
+    // Felled logs as rustic seating beside the fire.
+    { url: "/models/log.glb", position: [fireX - 2.4, 0, fireZ + 0.6], yaw: 100, scale: 1.5, collider: [0.9, 0.35, 0.4] },
+    { url: "/models/log.glb", position: [fireX + 1.2, 0, fireZ + 2.4], yaw: 20, scale: 1.4, collider: [0.85, 0.35, 0.4] },
     { url: "/models/sign.glb", position: [fireX + 3.5, 0, fireZ + 3.5], yaw: 200, scale: 1.5 },
   ];
 
@@ -100,5 +126,142 @@ export function buildSpawn(
     });
   }
 
+  // ---- Two lit lanterns marking the way out onto the path ---------------
+  buildCampLanterns(app, path);
+
+  // ---- Low fence guiding the eye from the camp toward the road ----------
+  buildCampFence(app, path, colliders);
+
+  // ---- Ground foliage so the camp feels lived-in (decorative) -----------
+  buildCampFoliage(app, fireX, fireZ);
+
+  // ---- Arrival cabin: the fully-built shelter beside the fire -----------
+  buildArrivalShelter(app, path, colliders, markers);
+
   return { spawn: spawnSample.position, spawnYaw, fireX, fireZ };
+}
+
+/**
+ * Drop the fully-built Arrival cabin off the right shoulder of the clearing,
+ * facing back toward the camp/path so its doorway reads as you spawn. The
+ * structure (walls + doorway + windows + roof + floor, a door prop, and a warm
+ * lantern at the threshold) is composed by {@link buildArrivalCabin}.
+ */
+function buildArrivalShelter(
+  app: pc.AppBase,
+  path: Path,
+  colliders: ColliderSpec[],
+  markers: Marker[],
+): void {
+  const cs = path.sample(0.05);
+  const rightX = cs.tangent.z;
+  const rightZ = -cs.tangent.x;
+  const offset = 7.5; // right of the clearing, clear of the fire + seating
+  const ax = cs.position.x + rightX * offset;
+  const az = cs.position.z + rightZ * offset;
+  const frame: StructureFrame = {
+    ox: ax,
+    oz: az,
+    alongX: cs.tangent.x,
+    alongZ: cs.tangent.z,
+    intoX: rightX,
+    intoZ: rightZ,
+    faceYaw: yawFromDir(-rightX, -rightZ),
+    marker: "lantern",
+  };
+  buildArrivalCabin(app, frame, colliders, markers);
+}
+
+/** Two warm lit lanterns flanking the path where it leaves the camp. */
+function buildCampLanterns(app: pc.AppBase, path: Path): void {
+  const s = path.sample(0.12);
+  const rightX = s.tangent.z;
+  const rightZ = -s.tangent.x;
+  const off = LAYOUT.path.width / 2 + 0.9;
+  const placements: Placement[] = [];
+  for (const side of [1, -1] as const) {
+    const x = s.position.x + rightX * off * side;
+    const z = s.position.z + rightZ * off * side;
+    placements.push({ position: [x, 0, z], yaw: yawFromDir(s.tangent.x, s.tangent.z), scale: 1.4 });
+    addPointLight(
+      app,
+      x,
+      LAYOUT.lantern.lightY,
+      z,
+      LAYOUT.lantern.intensity,
+      LAYOUT.lantern.range,
+    );
+  }
+  loadModelInstances(app, "/models/lamp.glb", placements);
+}
+
+/**
+ * A short, low fence line along the RIGHT shoulder of the path as it leaves the
+ * camp (the side away from the fire), with a corner post at the camp end — a
+ * leading line that reinforces "stay on the path". Emits low `"prop"` colliders
+ * so it stays consistent with the physics world.
+ */
+function buildCampFence(app: pc.AppBase, path: Path, colliders: ColliderSpec[]): void {
+  const off = LAYOUT.path.width / 2 + 0.7;
+  const posts: Placement[] = [];
+  const corners: Placement[] = [];
+
+  const ts = [0.055, 0.08, 0.105, 0.13];
+  let idx = 0;
+  for (let k = 0; k < ts.length; k++) {
+    const s = path.sample(ts[k]);
+    const rightX = s.tangent.z;
+    const rightZ = -s.tangent.x;
+    const x = s.position.x + rightX * off;
+    const z = s.position.z + rightZ * off;
+    const yaw = yawFromDir(s.tangent.x, s.tangent.z);
+    if (k === 0) {
+      corners.push({ position: [x, 0, z], yaw, scale: 1.4 });
+    } else {
+      posts.push({ position: [x, 0, z], yaw, scale: 1.4 });
+    }
+    colliders.push({
+      id: `camp-fence-${idx++}`,
+      type: "box",
+      position: [x, 0.5, z],
+      halfExtents: [0.12, 0.5, 1.3],
+      rotation: [0, yaw, 0],
+      role: "prop",
+    });
+  }
+  loadModelInstances(app, "/models/fence.glb", posts);
+  loadModelInstances(app, "/models/fence_corner.glb", corners);
+}
+
+/** Tufts of grass, flowers, bushes, and a mushroom dressing the camp ground. */
+function buildCampFoliage(app: pc.AppBase, fireX: number, fireZ: number): void {
+  const grass: Placement[] = [];
+  const bush: Placement[] = [];
+  const flowerRed: Placement[] = [];
+  const flowerYellow: Placement[] = [];
+  const mushroom: Placement[] = [];
+
+  // Scatter a deterministic ring of detail around the camp, kept clear of the
+  // fire itself so nothing sits in the flames.
+  const N = 18;
+  for (let i = 0; i < N; i++) {
+    const a = hash01(i * 1.7) * Math.PI * 2;
+    const r = 4.5 + hash01(i * 2.9) * 4.5; // 4.5 .. 9 from the fire
+    const x = fireX + Math.cos(a) * r;
+    const z = fireZ + Math.sin(a) * r;
+    const yaw = hash01(i * 4.1) * 360;
+    const p: Placement = { position: [x, 0, z], yaw, scale: 0.9 + hash01(i * 5.3) * 0.6 };
+    const pick = hash01(i * 6.7);
+    if (pick < 0.4) grass.push(p);
+    else if (pick < 0.6) bush.push(p);
+    else if (pick < 0.76) flowerRed.push(p);
+    else if (pick < 0.92) flowerYellow.push(p);
+    else mushroom.push({ ...p, scale: 0.8 });
+  }
+
+  loadModelInstances(app, "/models/grass.glb", grass);
+  loadModelInstances(app, "/models/bush.glb", bush);
+  loadModelInstances(app, "/models/flower_red.glb", flowerRed);
+  loadModelInstances(app, "/models/flower_yellow.glb", flowerYellow);
+  loadModelInstances(app, "/models/mushroom.glb", mushroom);
 }
