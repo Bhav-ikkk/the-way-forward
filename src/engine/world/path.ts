@@ -155,6 +155,39 @@ export class Path {
   }
 
   /**
+   * Sample the path by ARC-LENGTH distance `s` (world units, 0..length).
+   *
+   * This is the clean distance->sample API the on-rails movement model uses:
+   * the player position is tracked as a distance `s` along the spline, and each
+   * frame we ask for the world position + travel tangent at that distance.
+   * Distances outside [0, length] are clamped so the player can never overshoot
+   * the start or end of the journey.
+   */
+  sampleByDistance(s: number): PathSample {
+    return this.sample(this.tForDistance(s));
+  }
+
+  /**
+   * Map a parameter `t` in [0, 1] to its arc-length distance (world units).
+   *
+   * Inverse of {@link tForDistance}. Used to convert authored placements (which
+   * are expressed as `t` along the spline, e.g. the spawn point) into the
+   * distance space the on-rails movement runs in.
+   */
+  distanceForT(t: number): number {
+    const target = Math.max(0, Math.min(1, t));
+    const steps = this.arc.length - 1;
+    const scaled = target * steps;
+    let lo = Math.floor(scaled);
+    if (lo >= steps) return this.cachedLength;
+    if (lo < 0) lo = 0;
+    const frac = scaled - lo;
+    const a = this.arc[lo];
+    const b = this.arc[lo + 1];
+    return a.d + (b.d - a.d) * frac;
+  }
+
+  /**
    * Map a desired arc-length distance (0..length) back to a parameter t.
    * Used internally to space points evenly regardless of spline speed.
    */
