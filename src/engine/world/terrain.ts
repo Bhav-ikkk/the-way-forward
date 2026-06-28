@@ -1,7 +1,7 @@
 import type * as pc from "playcanvas";
 
 import type { Path } from "./path";
-import { addPrimitive, LAYOUT, makeMaterial } from "./shared";
+import { addPrimitive, hash01, LAYOUT, makeMaterial } from "./shared";
 import type { ColliderSpec } from "./types";
 
 /**
@@ -116,25 +116,56 @@ export function buildTerrain(
   // flat corridor and its shoulders stay perfectly level.
   const placeFrom = corridorHalfWidth + hillRamp * 0.25;
 
+  let moundSeed = 0;
   for (let gx = minX; gx <= maxX; gx += moundSpacing) {
     for (let gz = minZ; gz <= maxZ; gz += moundSpacing) {
+      moundSeed++;
       // Deterministic jitter so the grid never reads as a regular lattice.
-      const jx = (Math.sin(gx * 12.9898 + gz * 78.233) * 43758.5453) % 1;
-      const jz = (Math.sin(gx * 39.346 + gz * 11.135) * 24634.6345) % 1;
-      const x = gx + jx * moundSpacing * 0.5;
-      const z = gz + jz * moundSpacing * 0.5;
+      const jx = hash01(moundSeed * 1.7 + 0.3);
+      const jz = hash01(moundSeed * 2.9 + 1.1);
+      const jSkip = hash01(moundSeed * 4.3 + 2.7);
+      const x = gx + (jx - 0.5) * moundSpacing * 1.1;
+      const z = gz + (jz - 0.5) * moundSpacing * 1.1;
 
       const dist = distanceToPath(x, z, poly);
       if (dist < placeFrom) continue;
 
-      const h = terrainHeight(x, z, poly);
-      if (h < 0.4) continue; // too low to bother drawing
+      // Drop ~30% of cells so hills clump into ridges + hollows rather than a
+      // uniform field of identical domes (organic variation).
+      if (jSkip < 0.3) continue;
 
-      // Flattened sphere dome: vertical radius gives the visible height, the
-      // wide XZ radius makes neighbouring mounds blend into rolling terrain.
+      const baseH = terrainHeight(x, z, poly);
+      if (baseH < 0.4) continue; // too low to bother drawing
+
+      // Organic size variation: vertical height and footprint both vary per
+      // mound, and the further from the path the taller hills may rise.
+      const farBoost = Math.min(1, (dist - placeFrom) / (hillRamp * 2));
+      const hVar = 0.7 + hash01(moundSeed * 6.1) * 1.1; // 0.7..1.8
+      const h = baseH * hVar * (1 + farBoost * 0.6);
       const vScale = h * 2; // sphere radius is 0.5 → top sits at ~h
-      const hScale = moundSpacing * (1.7 + jx * 0.6);
-      addPrimitive(app, "sphere", moundMat, [x, 0, z], [hScale, vScale, hScale]);
+      const hScale = moundSpacing * (1.3 + hash01(moundSeed * 8.7) * 1.4);
+      const wobble = 0.8 + hash01(moundSeed * 3.3) * 0.5; // non-round footprint
+      addPrimitive(app, "sphere", moundMat, [x, 0, z], [hScale, vScale, hScale * wobble]);
     }
+  }
+
+  // ---- Distant rock/cliff silhouettes for far-horizon depth -------------
+  // A handful of taller, cooler-grey outcrops near the map edges that read as
+  // distant cliffs through the haze, giving the horizon shape and scale.
+  const outcropMat = makeMaterial(LAYOUT.terrain.outcropColor);
+  const { outcrops } = LAYOUT.terrain;
+  for (let i = 0; i < outcrops; i++) {
+    const f = (i + 0.5) / outcrops;
+    // Alternate sides; ride the far edge of the ground plane.
+    const side = i % 2 === 0 ? 1 : -1;
+    const edge = (half - moundSpacing) * side;
+    const ox = edge + (hash01(i * 5.1) - 0.5) * moundSpacing;
+    const oz = minZ + f * (maxZ - minZ) + (hash01(i * 7.7) - 0.5) * moundSpacing;
+    // Skip any that would intrude toward the corridor.
+    if (distanceToPath(ox, oz, poly) < corridorHalfWidth + hillRamp) continue;
+    const ch = 6 + hash01(i * 9.3) * 5; // 6..11 tall
+    const cw = moundSpacing * (1.0 + hash01(i * 2.2) * 0.8);
+    const yaw = hash01(i * 4.4) * 360;
+    addPrimitive(app, "sphere", outcropMat, [ox, 0, oz], [cw, ch, cw * 0.7], yaw);
   }
 }
