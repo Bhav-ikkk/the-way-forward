@@ -79,13 +79,32 @@ vi.mock("playcanvas", () => {
   class StandardMaterial {
     diffuse: unknown;
     emissive: unknown;
+    emissiveMap: unknown;
     opacity = 1;
     blendType = 0;
+    cull = 0;
+    useLighting = true;
+    useFog = true;
+    depthWrite = true;
     update() {}
+  }
+
+  // Minimal stand-in for pc.Texture (the sky-dome gradient). The atmosphere
+  // system only ever reaches this when a 2D canvas is available; under the
+  // mocked DOM it falls back to a solid colour, but the class is provided so
+  // the named export resolves regardless.
+  class Texture {
+    constructor(_device?: unknown, _opts?: unknown) {}
+    setSource() {}
+    destroy() {}
   }
 
   class Mouse {
     constructor(_el?: unknown) {}
+    on() {}
+    off() {}
+    disableContextMenu() {}
+    enableContextMenu() {}
   }
   class Keyboard {
     constructor(_el?: unknown) {}
@@ -100,7 +119,12 @@ vi.mock("playcanvas", () => {
     options: unknown;
     start = startSpy;
     destroy = destroySpy;
-    scene = { ambientLight: new Color() };
+    scene = {
+      ambientLight: new Color(),
+      // FogParams-like object the atmosphere system mutates in place.
+      fog: { type: "none", color: new Color(), start: 1, end: 1000, density: 0 },
+      exposure: 1,
+    };
     graphicsDevice = { maxPixelRatio: 1 };
     keyboard = new Keyboard();
     mouse = new Mouse();
@@ -129,12 +153,33 @@ vi.mock("playcanvas", () => {
     Color,
     Vec3,
     StandardMaterial,
+    Texture,
     Mouse,
     Keyboard,
-    math: { RAD_TO_DEG: 180 / Math.PI, DEG_TO_RAD: Math.PI / 180, lerp: () => 0 },
+    math: {
+      RAD_TO_DEG: 180 / Math.PI,
+      DEG_TO_RAD: Math.PI / 180,
+      lerp: () => 0,
+      clamp: (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v)),
+    },
     FILLMODE_FILL_WINDOW: "FILLMODE_FILL_WINDOW",
     RESOLUTION_AUTO: "RESOLUTION_AUTO",
     BLEND_NORMAL: 2,
+    // Fog enums read by the atmosphere system.
+    FOG_NONE: "none",
+    FOG_LINEAR: "linear",
+    FOG_EXP: "exp",
+    FOG_EXP2: "exp2",
+    // Sky-dome material + texture constants.
+    CULLFACE_NONE: 0,
+    CULLFACE_BACK: 1,
+    CULLFACE_FRONT: 2,
+    ADDRESS_CLAMP_TO_EDGE: 1,
+    FILTER_LINEAR: 1,
+    // Camera filmic grading constants.
+    TONEMAP_ACES: 3,
+    TONEMAP_FILMIC: 4,
+    GAMMA_SRGB: 1,
     KEY_W: 87,
     KEY_A: 65,
     KEY_S: 83,
@@ -143,6 +188,12 @@ vi.mock("playcanvas", () => {
     KEY_DOWN: 40,
     KEY_LEFT: 37,
     KEY_RIGHT: 39,
+    // Mouse event names + button id used by the cinematic CameraRig.
+    EVENT_MOUSEDOWN: "mousedown",
+    EVENT_MOUSEUP: "mouseup",
+    EVENT_MOUSEMOVE: "mousemove",
+    EVENT_MOUSEWHEEL: "mousewheel",
+    MOUSEBUTTON_LEFT: 0,
   };
 });
 
