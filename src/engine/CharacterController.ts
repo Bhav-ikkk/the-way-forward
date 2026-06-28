@@ -1,37 +1,44 @@
 import * as pc from "playcanvas";
 
+import { CameraRig } from "./CameraRig";
 import type { Physics } from "./physics";
+import type { Path } from "./world/path";
 import type { Checkpoint, CheckpointInfo } from "./world/types";
 
-/** Tunable controller values. */
-const MOVE_SPEED = 6; // units / second (top speed)
-const TURN_RATE = 12; // higher = snappier facing
-// Acceleration ramp: how quickly the horizontal speed eases toward / away from
-// the target. Higher = crisper starts/stops, lower = floatier. Frame-rate
-// independent (used as 1 - e^(-rate*dt)).
-const ACCEL_RATE = 12; // ease-in toward the target velocity
-const DECEL_RATE = 14; // ease-out back to rest (a touch snappier than accel)
-// Cinematic follow camera: a touch more distance + height, looking slightly
-// down, with a gentle critically-damped catch-up so turns feel smooth.
-const CAMERA_DISTANCE = 11; // how far behind the character the camera trails
-const CAMERA_HEIGHT = 6.5; // how high above the character (higher = more "down" angle)
-const CAMERA_SMOOTH = 3.5; // damping rate (higher = tighter follow, lower = more cinematic drift)
-const LOOK_HEIGHT = 1.2; // camera aims slightly above the feet so it tilts down a touch
-const LOOK_AHEAD = 2.5; // aim a little ahead of the character for a leading, cinematic framing
+/**
+ * Tunable controller values (ON-RAILS movement).
+ *
+ * The player is no longer a free physics body steered by WASD. Instead its
+ * position is a single distance `s` (world units) along the journey path
+ * spline. Forward input drives `s` up; backward input drives it down for a
+ * gentle retrace; there is no lateral movement. `s` is clamped to
+ * [0, pathLength] so the player can never overshoot either end of the journey.
+ */
+/** Forward walk speed (units/s) at full ramp. */
+const WALK_SPEED = 4.2;
+/** Backward (retrace) speed (units/s) — gentler than forward. */
+const REVERSE_SPEED = 2.6;
+// Acceleration ramp on the along-path speed: frame-rate-independent easing
+// (1 - e^(-rate*dt)) so starts and stops feel cinematic rather than abrupt.
+const ACCEL_RATE = 6; // ease-in toward target speed (lower = floatier start)
+const DECEL_RATE = 8; // ease-out back to rest (a touch snappier than accel)
+/** Yaw catch-up rate for aligning the character to the path tangent. */
+const TURN_RATE = 10;
+/** Speed (units/s) below which the character is treated as idle (no bob). */
+const MOVE_EPSILON = 0.05;
 const BOB_FREQUENCY = 9; // walk bob cycles
-const BOB_HEIGHT = 0.12; // walk bob amplitude
-const BASE_Y = 0; // character feet stay on the ground plane (pre-physics idle)
-// Camera collision: cast from the character's head toward the desired camera
-// position; if blocked, pull the camera in to just before the hit.
-const CAMERA_HEAD_HEIGHT = 1.5; // ray origin height above the feet
-const CAMERA_COLLISION_MARGIN = 0.4; // keep the camera this far off the hit surface
-const CAMERA_MIN_DISTANCE = 1.5; // never let the corrected pull-in get closer than this
+const BOB_HEIGHT = 0.14; // walk bob amplitude (scaled up slightly with the player)
+const BASE_Y = 0; // flat corridor: the player feet stay on the ground plane
 
 interface ControllerOptions {
   checkpoints: Checkpoint[];
   onCheckpointChange?: (checkpoint: CheckpointInfo | null) => void;
-  /** Initial facing (degrees) so the player starts looking down the path. */
-  initialYaw?: number;
+  /** The journey path spline the player rides along. */
+  path: Path;
+  /** Starting distance `s` (world units) along the path (the spawn point). */
+  initialDistance: number;
+  /** App mouse used to drive the cinematic orbit camera rig. */
+  mouse?: pc.Mouse | null;
 }
 
 /** Shortest signed angular difference (degrees) from `a` to `b`. */
@@ -43,37 +50,46 @@ function shortestAngleDelta(a: number, b: number): number {
 }
 
 /**
- * Drives the spawned character with WASD / arrow keys, rotates it to face its
- * movement direction, applies a subtle walk bob (these models are not rigged),
- * trails a follow camera behind + above it, and reports checkpoint enter/leave.
+ * Drives the spawned character ON RAILS along the journey path spline.
  *
- * Movement is smoothed with an acceleration/deceleration ramp so starts and
- * stops ease in/out instead of snapping. When a {@link Physics} handle is
- * attached the horizontal motion is resolved through Rapier (slide along walls,
- * blocked by props/landmarks, confined to the corridor, crossing on the
- * bridge) and the character is placed from the resolved FEET position; the walk
- * bob is layered on purely as a visual Y offset so it never fights physics.
- * Before physics is attached the character simply idles in place (no transform
- * fallback that would later teleport once physics takes over).
+ * Movement model: the player's position is a distance `s` along the path.
+ * W / ArrowUp ramps `s` forward; S / ArrowDown ramps it backward (gentle
+ * retrace); there is no strafing. The along-path speed eases in/out with an
+ * acceleration/deceleration ramp + inertia so starts and stops feel cinematic,
+ * and `s` is clamped to [0, length] so the player can never leave the path.
+ * Each frame the character is placed at the sampled spline position (flat
+ * corridor, y ≈ 0) and its yaw eases to the travel tangent (reversed when
+ * retracing). A subtle walk bob is layered on as a pure VISUAL Y offset.
+ *
+ * Because the motion is constrained to the spline the player is inherently
+ * confined to the path. When a {@link Physics} handle is attached the kinematic
+ * capsule is SNAPPED to the on-rails position each frame (so the physics state
+ * stays consistent and is available for the camera-collision raycast), but the
+ * motion is always DERIVED from the spline, never integrated by physics.
+ *
+ * The cinematic orbit camera is delegated to a {@link CameraRig}, which this
+ * controller feeds the player position + travel tangent every frame.
  */
 export class CharacterController {
   private readonly app: pc.AppBase;
   private readonly character: pc.Entity;
-  private readonly camera: pc.Entity;
   private readonly options: ControllerOptions;
+  private readonly path: Path;
+  private readonly pathLength: number;
+  private readonly rig: CameraRig;
 
   private physics: Physics | null = null;
 
+  /** Distance along the path (world units), the single movement DOF. */
+  private s: number;
+  /** Smoothed along-path speed (units/s); signed (+ forward, - backward). */
+  private speed = 0;
   private yaw = 0;
   private walkPhase = 0;
   private posX = 0;
   private posY = BASE_Y;
   private posZ = 0;
-  // Current smoothed horizontal velocity (units/s) for the accel/decel ramp.
-  private velX = 0;
-  private velZ = 0;
   private activeCheckpointId: string | null = null;
-  private cameraInitialized = false;
 
   private readonly onUpdate: (dt: number) => void;
 
@@ -85,172 +101,122 @@ export class CharacterController {
   ) {
     this.app = app;
     this.character = character;
-    this.camera = camera;
     this.options = options;
+    this.path = options.path;
+    this.pathLength = options.path.length();
+    this.s = pc.math.clamp(options.initialDistance, 0, this.pathLength);
 
-    const start = character.getLocalPosition();
-    this.posX = start.x;
-    this.posY = start.y;
-    this.posZ = start.z;
-    this.yaw = options.initialYaw ?? 0;
+    // Place the character at the spawn sample immediately and face down-path.
+    const sample = this.path.sampleByDistance(this.s);
+    this.posX = sample.position.x;
+    this.posY = BASE_Y;
+    this.posZ = sample.position.z;
+    const tangentYaw =
+      Math.atan2(sample.tangent.x, sample.tangent.z) * pc.math.RAD_TO_DEG;
+    this.yaw = tangentYaw;
+    this.character.setLocalPosition(this.posX, this.posY, this.posZ);
+    this.character.setLocalEulerAngles(0, this.yaw, 0);
+
+    // The cinematic orbit camera rig starts behind the player along the path.
+    this.rig = new CameraRig(
+      camera,
+      options.mouse ?? null,
+      tangentYaw * pc.math.DEG_TO_RAD,
+    );
 
     this.onUpdate = (dt: number) => this.update(dt);
     this.app.on("update", this.onUpdate);
   }
 
   /**
-   * Attach the physics world once it has finished loading (and the character
-   * capsule has been created at the spawn). From this point movement is
-   * resolved through Rapier. Idempotent.
+   * Attach the physics world once it has loaded. From here the kinematic
+   * capsule is snapped to the on-rails position each frame and the camera rig
+   * can run its collision-avoidance ray. Idempotent.
    */
   attachPhysics(physics: Physics): void {
     this.physics = physics;
-    // Re-sync the visual position to the physics feet so the hand-off doesn't
-    // pop (the capsule was spawned at this same position).
-    const foot = physics.getCharacterFootPosition();
-    this.posX = foot.x;
-    this.posY = foot.y;
-    this.posZ = foot.z;
+    this.rig.setPhysics(physics);
+    // Snap the capsule to the current on-rails feet so the hand-off is seamless.
+    physics.setCharacterPosition({ x: this.posX, y: this.posY, z: this.posZ });
   }
 
   private update(dt: number): void {
     const kb = this.app.keyboard;
 
-    // ---- Read input ------------------------------------------------------
-    let inputX = 0;
-    let inputZ = 0;
+    // ---- Read input (forward / backward only — no strafing) -------------
+    let drive = 0;
     if (kb) {
-      if (kb.isPressed(pc.KEY_W) || kb.isPressed(pc.KEY_UP)) inputZ += 1;
-      if (kb.isPressed(pc.KEY_S) || kb.isPressed(pc.KEY_DOWN)) inputZ -= 1;
-      if (kb.isPressed(pc.KEY_A) || kb.isPressed(pc.KEY_LEFT)) inputX -= 1;
-      if (kb.isPressed(pc.KEY_D) || kb.isPressed(pc.KEY_RIGHT)) inputX += 1;
+      if (kb.isPressed(pc.KEY_W) || kb.isPressed(pc.KEY_UP)) drive += 1;
+      if (kb.isPressed(pc.KEY_S) || kb.isPressed(pc.KEY_DOWN)) drive -= 1;
     }
+    const moving = drive !== 0;
 
-    const moving = inputX !== 0 || inputZ !== 0;
-
-    // ---- Smooth velocity ramp (ease in/out) ------------------------------
-    // Target velocity is the normalized input direction at MOVE_SPEED. The
-    // current velocity eases toward it (accel) or toward zero (decel) using a
-    // frame-rate-independent exponential approach, so starts/stops feel smooth.
-    let targetVX = 0;
-    let targetVZ = 0;
-    if (moving) {
-      const len = Math.sqrt(inputX * inputX + inputZ * inputZ);
-      targetVX = (inputX / len) * MOVE_SPEED;
-      targetVZ = (inputZ / len) * MOVE_SPEED;
-    }
+    // ---- Smooth along-path speed ramp (ease in/out + inertia) -----------
+    const targetSpeed =
+      drive > 0 ? WALK_SPEED : drive < 0 ? -REVERSE_SPEED : 0;
     const rampRate = moving ? ACCEL_RATE : DECEL_RATE;
     const ramp = 1 - Math.exp(-rampRate * dt);
-    this.velX = pc.math.lerp(this.velX, targetVX, ramp);
-    this.velZ = pc.math.lerp(this.velZ, targetVZ, ramp);
+    this.speed = pc.math.lerp(this.speed, targetSpeed, ramp);
 
-    // ---- Face movement direction (smooth yaw) ----------------------------
-    if (moving) {
-      const targetYaw = Math.atan2(inputX, inputZ) * pc.math.RAD_TO_DEG;
+    // ---- Advance `s` and clamp to the path ------------------------------
+    this.s += this.speed * dt;
+    if (this.s <= 0) {
+      this.s = 0;
+      if (this.speed < 0) this.speed = 0; // kill residual inertia at the start
+    } else if (this.s >= this.pathLength) {
+      this.s = this.pathLength;
+      if (this.speed > 0) this.speed = 0; // kill residual inertia at the end
+    }
+
+    // ---- Sample the spline: position + travel tangent -------------------
+    const sample = this.path.sampleByDistance(this.s);
+    this.posX = sample.position.x;
+    this.posY = BASE_Y;
+    this.posZ = sample.position.z;
+    const tangentYaw =
+      Math.atan2(sample.tangent.x, sample.tangent.z) * pc.math.RAD_TO_DEG;
+
+    // ---- Align yaw to the tangent (reverse facing when retracing) -------
+    const absSpeed = Math.abs(this.speed);
+    if (absSpeed > MOVE_EPSILON) {
+      const targetYaw = this.speed < 0 ? tangentYaw + 180 : tangentYaw;
       const delta = shortestAngleDelta(this.yaw, targetYaw);
       this.yaw += delta * Math.min(1, TURN_RATE * dt);
     }
 
-    // ---- Walk bob (visual only; idle when still) -------------------------
-    const speedSq = this.velX * this.velX + this.velZ * this.velZ;
+    // ---- Walk bob (visual only; idle when stopped) ----------------------
     let bob = 0;
-    if (speedSq > 0.04) {
+    if (absSpeed > MOVE_EPSILON) {
       this.walkPhase += dt * BOB_FREQUENCY;
       bob = Math.abs(Math.sin(this.walkPhase)) * BOB_HEIGHT;
     } else {
       this.walkPhase = 0;
     }
 
-    // ---- Advance position ------------------------------------------------
-    if (this.physics) {
-      // Resolve this frame's horizontal displacement through Rapier, then step
-      // the world once and read back the resolved feet position.
-      const dispX = this.velX * dt;
-      const dispZ = this.velZ * dt;
-      this.physics.moveCharacter({ x: dispX, z: dispZ }, dt);
-      this.physics.step(dt);
-      const foot = this.physics.getCharacterFootPosition();
-      this.posX = foot.x;
-      this.posY = foot.y;
-      this.posZ = foot.z;
-      // Bob is a VISUAL offset layered on the physics feet — never fed back in.
-      this.character.setLocalPosition(this.posX, this.posY + bob, this.posZ);
-    } else {
-      // Physics not attached yet: idle in place (no transform-only movement
-      // that would teleport once physics takes over).
-      this.character.setLocalPosition(this.posX, this.posY + bob, this.posZ);
-    }
+    // ---- Place the character + keep the capsule in sync -----------------
+    this.character.setLocalPosition(this.posX, this.posY + bob, this.posZ);
     this.character.setLocalEulerAngles(0, this.yaw, 0);
-
-    // ---- Cinematic follow camera (trails behind + above, smooth) ---------
-    const yawRad = this.yaw * pc.math.DEG_TO_RAD;
-    const forwardX = Math.sin(yawRad);
-    const forwardZ = Math.cos(yawRad);
-    let desiredX = this.posX - forwardX * CAMERA_DISTANCE;
-    let desiredZ = this.posZ - forwardZ * CAMERA_DISTANCE;
-    const desiredY = this.posY + CAMERA_HEIGHT;
-
-    // Camera collision: raycast from the character's head toward the desired
-    // camera position; if a static collider (wall / landmark / hill) is in the
-    // way, pull the camera in to just before the hit so it never clips through.
     if (this.physics) {
-      const headX = this.posX;
-      const headY = this.posY + CAMERA_HEAD_HEIGHT;
-      const headZ = this.posZ;
-      const frac = this.physics.raycast(
-        headX,
-        headY,
-        headZ,
-        desiredX,
-        desiredY,
-        desiredZ,
-      );
-      if (frac !== null && frac < 1) {
-        const dx = desiredX - headX;
-        const dy = desiredY - headY;
-        const dz = desiredZ - headZ;
-        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-        // Pull in to the hit minus a margin, clamped to a sane minimum.
-        const hitDist = frac * dist;
-        const corrected = Math.max(
-          CAMERA_MIN_DISTANCE,
-          hitDist - CAMERA_COLLISION_MARGIN,
-        );
-        const s = corrected / dist;
-        desiredX = headX + dx * s;
-        desiredZ = headZ + dz * s;
-        // Leave desiredY as-is: the catch-up lerp below smooths any height
-        // change so the corrected position never pops.
-      }
+      // Snap the kinematic capsule to the on-rails feet (no bob — physics state
+      // tracks the rail, the bob is purely a visual flourish), then step the
+      // world so the collider position is committed for the camera ray.
+      this.physics.setCharacterPosition({
+        x: this.posX,
+        y: this.posY,
+        z: this.posZ,
+      });
+      this.physics.step(dt);
     }
 
-    const cam = this.camera.getLocalPosition();
-    if (!this.cameraInitialized) {
-      // Snap on the first frame so we don't sweep in from the origin.
-      this.camera.setLocalPosition(desiredX, desiredY, desiredZ);
-      this.cameraInitialized = true;
-    } else {
-      // Frame-rate-independent critically-damped style smoothing: the fraction
-      // covered per frame is 1 - e^(-k*dt), which stays stable at any dt and
-      // gives a gentle catch-up on turns (and a smooth, pop-free pull-in when
-      // the camera-collision ray shortens the boom) without jitter.
-      const t = 1 - Math.exp(-CAMERA_SMOOTH * dt);
-      this.camera.setLocalPosition(
-        pc.math.lerp(cam.x, desiredX, t),
-        pc.math.lerp(cam.y, desiredY, t),
-        pc.math.lerp(cam.z, desiredZ, t),
-      );
-    }
+    // ---- Drive the cinematic orbit camera -------------------------------
+    this.rig.update(dt, {
+      x: this.posX,
+      y: this.posY,
+      z: this.posZ,
+      tangentYaw: tangentYaw * pc.math.DEG_TO_RAD,
+    });
 
-    // Aim a little ahead of and above the character for a leading, slightly
-    // downward cinematic framing.
-    this.camera.lookAt(
-      this.posX + forwardX * LOOK_AHEAD,
-      this.posY + LOOK_HEIGHT,
-      this.posZ + forwardZ * LOOK_AHEAD,
-    );
-
-    // ---- Checkpoint detection -------------------------------------------
+    // ---- Checkpoint detection (distance-based against on-rails pos) -----
     this.checkCheckpoints();
   }
 
@@ -272,8 +238,9 @@ export class CharacterController {
     }
   }
 
-  /** Remove the update handler. Safe to call once during disposal. */
+  /** Remove the update handler + camera input listeners. Safe to call once. */
   destroy(): void {
     this.app.off("update", this.onUpdate);
+    this.rig.destroy();
   }
 }
