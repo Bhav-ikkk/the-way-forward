@@ -67,6 +67,29 @@ function validDataset() {
     achievements: [{ id: "a1", title: "Award", description: "Won a thing." }],
     settings: { theme: "dark", worldTitle: "My World" },
     socials: [{ platform: "github", label: "GitHub", url: "https://gh" }],
+    chapters: [
+      {
+        id: "arrival-camp",
+        title: "Arrival Camp",
+        question: "Who am I?",
+        purpose: "Greet.",
+        emotion: "warm",
+        environment: "A camp.",
+        requiredAssets: ["campfire"],
+        dialogue: { speaker: "Guide", lines: ["Welcome."] },
+        portfolioContent: ["profile"],
+        transition: "Onward.",
+      },
+    ],
+    timeline: [
+      {
+        id: "t1",
+        date: "2020",
+        title: "Start",
+        description: "Began.",
+      },
+    ],
+    dialogues: [{ id: "d1", speaker: "Sign", lines: ["This way."] }],
   } satisfies Record<DataFileName, unknown>;
 }
 
