@@ -3,10 +3,13 @@ import type * as pc from "playcanvas";
 import { createPath, type Path, type PathSample } from "./path";
 import { BRIDGE_CROSSING_T, RIVER_CONTROL_POINTS } from "./landmarks";
 import {
+  addPointLight,
   LAYOUT,
   layStripAlongPath,
   loadModel,
+  loadModelInstances,
   makeMaterial,
+  type Placement,
   yawFromDir,
 } from "./shared";
 import type { ColliderSpec } from "./types";
@@ -21,14 +24,18 @@ export interface RiverResult {
 
 /**
  * River system: the winding river strip, the bridge spanning it at the path
- * crossing, and the collider specs for the walkable bridge deck. The river
- * spline is forced through the exact path crossing point so the bridge always
- * lines up over the water.
+ * crossing, the collider specs for the walkable bridge deck, and the DRESSING
+ * that makes the crossing read as a designed river crossing rather than a plank
+ * on a strip — rocks + stones on the banks, lily pads floating in the water,
+ * and warm lanterns at each end of the bridge.
  *
- * The walkable bridge DECK collider (role `"bridge"`) spans the full corridor
- * width at the crossing, so in pass 2 the player always crosses on the bridge
- * and never through the water; the path-edge walls (from {@link ./road}) form
- * the bridge's guard rails while the deck itself stays an open walkway.
+ * The river spline is forced through the exact path crossing point so the
+ * bridge always lines up over the water. The walkable bridge DECK collider
+ * (role `"bridge"`) spans the full corridor width at the crossing, so in pass 2
+ * the player always crosses on the bridge and never through the water; the
+ * path-edge walls (from {@link ./road}) form the guard rails while the deck
+ * stays an open walkway. Bank rocks near the walkway emit `"prop"` colliders;
+ * lily pads + pebbles are pure dressing and carry none.
  */
 export function buildRiver(
   app: pc.AppBase,
@@ -80,5 +87,142 @@ export function buildRiver(
     role: "bridge",
   });
 
+  // ---- Crossing dressing (banks + lilies + end lanterns) -----------------
+  dressCrossing(app, river, crossing, colliders);
+
   return { river, crossing };
+}
+
+/**
+ * Dress the river crossing so it reads as an intentional set piece:
+ *  - a lantern on each bank-side at both ends of the bridge (the two near ends
+ *    lit, for a warm wayfinding glow as you approach),
+ *  - rock + stone clusters tumbling down both banks to anchor the crossing,
+ *  - lily pads floating on the water to either side of the deck.
+ * Placement is deterministic and modest so the light/draw budget stays tight.
+ * Each GLB loads once and instances out.
+ */
+function dressCrossing(
+  app: pc.AppBase,
+  river: Path,
+  crossing: PathSample,
+  colliders: ColliderSpec[],
+): void {
+  const cx = crossing.position.x;
+  const cz = crossing.position.z;
+  // Forward (down-path) + right-of-travel unit vectors at the crossing.
+  const fX = crossing.tangent.x;
+  const fZ = crossing.tangent.z;
+  const rX = crossing.tangent.z;
+  const rZ = -crossing.tangent.x;
+  const yaw = yawFromDir(fX, fZ);
+
+  const deckHalf = LAYOUT.path.width / 2 + LAYOUT.path.shoulder; // ~2.8
+  const endDist = 4.6; // just past the deck, where the bank meets the path
+  const laneOff = LAYOUT.path.width / 2 + 0.9; // shoulder line for lanterns
+
+  // ---- Lanterns at both ends (4 models; one warm pool of light per end) --
+  const lampPlacements: Placement[] = [];
+  for (const end of [1, -1] as const) {
+    const ex = cx + fX * endDist * end;
+    const ez = cz + fZ * endDist * end;
+    for (const side of [1, -1] as const) {
+      lampPlacements.push({
+        position: [ex + rX * laneOff * side, 0, ez + rZ * laneOff * side],
+        yaw,
+        scale: 1.4,
+      });
+    }
+    // One warm light per end (on the +side lantern) for wayfinding glow.
+    addPointLight(
+      app,
+      ex + rX * laneOff,
+      LAYOUT.lantern.lightY,
+      ez + rZ * laneOff,
+      LAYOUT.marker.lanternIntensity,
+    );
+  }
+  loadModelInstances(app, "/models/lamp.glb", lampPlacements);
+
+  // ---- Bank rocks tumbling down both banks ------------------------------
+  const rockLarge: Placement[] = [];
+  const rockSmall: Placement[] = [];
+  const stones: Placement[] = [];
+  let rockIdx = 0;
+  for (const end of [1, -1] as const) {
+    const bx = cx + fX * (endDist + 1.2) * end;
+    const bz = cz + fZ * (endDist + 1.2) * end;
+    for (const side of [1, -1] as const) {
+      // A large anchor rock just beyond the shoulder (gets a collider).
+      const lo = deckHalf + 1.4;
+      const lx = bx + rX * lo * side;
+      const lz = bz + rZ * lo * side;
+      rockLarge.push({ position: [lx, 0, lz], yaw: (end * 47 + side * 90) % 360, scale: 1.9 });
+      colliders.push({
+        id: `bridge-rock-${rockIdx++}`,
+        type: "box",
+        position: [lx, 0.7, lz],
+        halfExtents: [0.9, 0.7, 0.9],
+        rotation: [0, 0, 0],
+        role: "prop",
+      });
+      // A smaller rock + a pebble spilling toward the water (decorative).
+      rockSmall.push({
+        position: [bx + rX * (lo - 1.0) * side, 0, bz + rZ * (lo - 1.0) * side],
+        yaw: (end * 110 + side * 33) % 360,
+        scale: 1.3,
+      });
+      stones.push({
+        position: [bx + rX * (lo + 0.8) * side, 0, bz + rZ * (lo + 0.8) * side],
+        yaw: (end * 200 + side * 17) % 360,
+        scale: 1.2,
+      });
+    }
+  }
+  loadModelInstances(app, "/models/rock_large.glb", rockLarge);
+  loadModelInstances(app, "/models/rock_small.glb", rockSmall);
+  loadModelInstances(app, "/models/stone_small.glb", stones);
+
+  // ---- Bank foliage softening the approaches (decorative) ---------------
+  const bushes: Placement[] = [];
+  const grass: Placement[] = [];
+  const flowers: Placement[] = [];
+  for (let k = 0; k < 10; k++) {
+    const end = k % 2 === 0 ? 1 : -1;
+    const side = k % 3 === 0 ? 1 : -1;
+    const a = endDist + 1.6 + (k % 4) * 0.8;
+    const lat = deckHalf + 1.6 + ((k * 0.37) % 1) * 2.0;
+    const x = cx + fX * a * end + rX * lat * side;
+    const z = cz + fZ * a * end + rZ * lat * side;
+    const yawK = (k * 47) % 360;
+    if (k % 4 === 0) bushes.push({ position: [x, 0, z], yaw: yawK, scale: 1.2 });
+    else if (k % 4 === 1) flowers.push({ position: [x, 0, z], yaw: yawK, scale: 1.1 });
+    else grass.push({ position: [x, 0, z], yaw: yawK, scale: 1.2 });
+  }
+  loadModelInstances(app, "/models/bush.glb", bushes);
+  loadModelInstances(app, "/models/grass.glb", grass);
+  loadModelInstances(app, "/models/flower_yellow.glb", flowers);
+
+  // ---- Lily pads floating on the water, to either side of the deck ------
+  // Sample the river spline around its middle (where it meets the crossing) so
+  // the pads follow the water as it winds, dropping off to both sides of the
+  // deck. Pads that would sit on/under the bridge deck are skipped.
+  const lilies: Placement[] = [];
+  for (let k = -4; k <= 4; k++) {
+    const rt = 0.5 + k * 0.035;
+    if (rt < 0 || rt > 1) continue;
+    const rs = river.sample(rt);
+    const dAlong = (rs.position.x - cx) * fX + (rs.position.z - cz) * fZ;
+    if (Math.abs(dAlong) < deckHalf + 0.5) continue;
+    const jitter = ((k * 53.1) % 10) / 10 - 0.5; // -0.5..0.5 deterministic
+    const lat = jitter * (LAYOUT.river.width * 0.3);
+    const lx = rs.position.x + rs.tangent.z * lat;
+    const lz = rs.position.z - rs.tangent.x * lat;
+    lilies.push({
+      position: [lx, LAYOUT.river.y + 0.02, lz],
+      yaw: (k * 64) % 360,
+      scale: 1.1,
+    });
+  }
+  loadModelInstances(app, "/models/lily.glb", lilies);
 }
