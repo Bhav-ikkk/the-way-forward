@@ -16,9 +16,10 @@ export interface NpcOptions {
 }
 
 /**
- * NPC system: places Wren, the greeter, beside the campfire facing the player's
- * spawn, and registers her as a proximity checkpoint so walking back to camp
- * re-shows the welcome copy as multi-line dialogue.
+ * NPC system: places the greeter beside the campfire facing the player's spawn,
+ * and registers them as a proximity checkpoint so walking back to camp re-shows
+ * the welcome copy as multi-line dialogue. The greeter's name and lines come
+ * from the welcome copy (sourced from content), never from the engine.
  */
 export function buildNpc(
   app: pc.AppBase,
