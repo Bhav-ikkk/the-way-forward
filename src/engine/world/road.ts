@@ -1,10 +1,12 @@
 import type * as pc from "playcanvas";
 
 import type { Path } from "./path";
+import { BRIDGE_CROSSING_T, SPAWN_T } from "./landmarks";
 import {
+  addPointLight,
   LAYOUT,
   layStripAlongPath,
-  loadModel,
+  loadModelInstances,
   makeMaterial,
   yawFromDir,
 } from "./shared";
@@ -39,27 +41,83 @@ export function buildRoad(
   );
 
   // ---- Wayfinding lanterns lining the path -------------------------------
-  const linePoints = path.getEvenlySpacedPoints(LAYOUT.path.segments + 1);
-  for (
-    let i = LAYOUT.path.lanternEvery;
-    i < linePoints.length;
-    i += LAYOUT.path.lanternEvery
-  ) {
-    const s = linePoints[i];
-    const side = i % (LAYOUT.path.lanternEvery * 2) === 0 ? 1 : -1;
-    const rightX = s.tangent.z;
-    const rightZ = -s.tangent.x;
-    const lx = s.position.x + rightX * (LAYOUT.path.width / 2 + 0.9) * side;
-    const lz = s.position.z + rightZ * (LAYOUT.path.width / 2 + 0.9) * side;
-    loadModel(app, "/models/lamp.glb", (root) => {
-      root.setLocalPosition(lx, 0, lz);
-      root.setEulerAngles(0, yawFromDir(s.tangent.x, s.tangent.z), 0);
-      root.setLocalScale(1.4, 1.4, 1.4);
-    });
-  }
+  buildLanterns(app, path);
 
   // ---- Invisible path-edge confinement walls (collider specs only) -------
   buildConfinementWalls(path, colliders);
+}
+
+/**
+ * Place lamp models along the path as wayfinding, spaced more tightly as the
+ * road approaches the two emotional anchors — the spawn camp and the bridge
+ * crossing — and sparser on the long straights. A capped subset of the lamps
+ * NEAREST those anchors get a real warm point light so the approaches glow
+ * (the cap keeps the lit-light budget tight); the rest are unlit models. All
+ * lamps load from a single GLB fetch and instance out for performance.
+ */
+function buildLanterns(app: pc.AppBase, path: Path): void {
+  const pts = path.getEvenlySpacedPoints(LAYOUT.path.segments + 1);
+  const last = pts.length - 1;
+  const halfW = LAYOUT.path.width / 2 + 0.9;
+
+  /** Nearness (0..1) of t to an anchor over the given falloff. */
+  const near = (t: number, anchor: number, falloff: number) =>
+    Math.max(0, 1 - Math.abs(t - anchor) / falloff);
+
+  interface Lamp {
+    x: number;
+    z: number;
+    yaw: number;
+    importance: number;
+  }
+  const lamps: Lamp[] = [];
+
+  let i = 6;
+  let sideFlip = 0;
+  while (i <= last) {
+    const t = i / last;
+    const s = pts[i];
+    const side = sideFlip % 2 === 0 ? 1 : -1;
+    sideFlip++;
+    const rightX = s.tangent.z;
+    const rightZ = -s.tangent.x;
+    const x = s.position.x + rightX * halfW * side;
+    const z = s.position.z + rightZ * halfW * side;
+    const importance = Math.max(
+      near(t, SPAWN_T, 0.14),
+      near(t, BRIDGE_CROSSING_T, 0.12),
+    );
+    lamps.push({
+      x,
+      z,
+      yaw: yawFromDir(s.tangent.x, s.tangent.z),
+      importance,
+    });
+    // Tighter spacing approaching the camp / bridge, looser on straights.
+    i += importance > 0.45 ? 3 : 6;
+  }
+
+  loadModelInstances(
+    app,
+    "/models/lamp.glb",
+    lamps.map((l) => ({ position: [l.x, 0, l.z], yaw: l.yaw, scale: 1.4 })),
+  );
+
+  // Light only the lamps closest to the anchors, capped for perf.
+  const lit = [...lamps]
+    .filter((l) => l.importance > 0)
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, LAYOUT.lantern.maxLit);
+  for (const l of lit) {
+    addPointLight(
+      app,
+      l.x,
+      LAYOUT.lantern.lightY,
+      l.z,
+      LAYOUT.lantern.intensity,
+      LAYOUT.lantern.range,
+    );
+  }
 }
 
 /**
