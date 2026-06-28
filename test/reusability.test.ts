@@ -108,6 +108,35 @@ const ALTERNATE: Record<DataFileName, unknown> = {
     { platform: "github", label: "@adaalt", url: "https://example.com/github/adaalt" },
     { platform: "website", label: "ada.example", url: "https://ada.example" },
   ],
+  chapters: [
+    {
+      id: "arrival-camp",
+      title: "Ada's Arrival",
+      question: "Who am I?",
+      purpose: "Introduce Ada.",
+      emotion: "calm, precise",
+      environment: "A quiet observatory deck at dusk.",
+      requiredAssets: ["deck", "telescope"],
+      dialogue: {
+        speaker: "Compass, the Guide",
+        lines: ["Welcome. I'm Compass, and this is Ada's world."],
+      },
+      portfolioContent: ["profile"],
+      transition: "Follow the rail toward the data hall.",
+    },
+  ],
+  timeline: [
+    {
+      id: "alt.t1",
+      date: "2016",
+      title: "Started building systems",
+      description: "Ada wrote her first distributed scheduler.",
+      kind: "milestone",
+    },
+  ],
+  dialogues: [
+    { id: "alt.sign", speaker: "Beacon", lines: ["Data hall ahead."] },
+  ],
 };
 
 const fileNames = Object.keys(dataFileSchemas) as DataFileName[];
