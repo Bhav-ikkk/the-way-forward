@@ -1,0 +1,117 @@
+[
+  {
+    "id": "arrival-camp",
+    "title": "Arrival Camp",
+    "question": "Who am I?",
+    "purpose": "Welcome the traveller and introduce the developer's identity before the journey begins.",
+    "emotion": "warm, inviting, quietly curious",
+    "environment": "A cozy clearing at first light, a campfire crackling beside a small tent as mist lifts off the path ahead.",
+    "requiredAssets": ["campfire", "tent", "lantern", "guide-character"],
+    "dialogue": {
+      "speaker": "Wren, the Guide",
+      "lines": [
+        "Welcome, traveller. I'm Wren — I tend this little camp at the start of the road.",
+        "Everything ahead is the story of one developer, told as a place you can walk through.",
+        "Follow the lanterns and firepits; they mark the way when the path bends out of sight.",
+        "Take your time. Use WASD or the arrow keys to walk, and I'll be here when you wander back."
+      ]
+    },
+    "portfolioContent": ["profile"],
+    "transition": "When you're ready, follow the path out of camp toward the sound of hammering — the workshop is waiting."
+  },
+  {
+    "id": "workshop",
+    "title": "The Workshop",
+    "question": "What have I built?",
+    "purpose": "Show the things the developer has made and how they were put together.",
+    "emotion": "industrious, proud, hands-on",
+    "environment": "A canvas workshop tent ringed by workbenches and half-finished prototypes, tools resting where they were last used.",
+    "requiredAssets": ["workshop-tent", "workbench", "scattered-tools"],
+    "dialogue": {
+      "speaker": "Wren, the Guide",
+      "lines": [
+        "This is the Workshop — where ideas get hammered into things that actually work.",
+        "Look around: every bench holds a project that started as a rough sketch.",
+        "Nothing here is precious. It's all made to be taken apart and rebuilt better."
+      ]
+    },
+    "portfolioContent": ["projects"],
+    "transition": "Past the workbenches, a quiet building of shelves rises through the trees — the Library is next."
+  },
+  {
+    "id": "library",
+    "title": "The Library",
+    "question": "What do I know?",
+    "purpose": "Reveal the developer's skills and the learning that grew them.",
+    "emotion": "calm, studious, rooted",
+    "environment": "A grove built around a great tree, its branches hung with lanterns and its roots stacked with weathered books.",
+    "requiredAssets": ["great-tree", "stacked-books", "reading-lantern"],
+    "dialogue": {
+      "speaker": "Wren, the Guide",
+      "lines": [
+        "The Library — knowledge grows tall here, a ring at a time.",
+        "Some of these books are languages, some are tools, some are hard lessons learned twice.",
+        "Skills aren't shelved and forgotten; they're tended like the tree that holds them."
+      ]
+    },
+    "portfolioContent": ["skills", "education"],
+    "transition": "A faint hum and a glow lead off the main path toward a low building of glass and wire — the AI Laboratory."
+  },
+  {
+    "id": "ai-laboratory",
+    "title": "The AI Laboratory",
+    "question": "What am I exploring?",
+    "purpose": "Surface the experimental, forward-looking work the developer is curious about right now.",
+    "emotion": "inquisitive, energised, a little restless",
+    "environment": "A glass-walled lab humming with prototypes and soft indicator lights, screens sketching ideas that aren't finished yet.",
+    "requiredAssets": ["lab-structure", "prototype-rigs", "indicator-lights"],
+    "dialogue": {
+      "speaker": "Wren, the Guide",
+      "lines": [
+        "The AI Laboratory — this is where the half-formed ideas live.",
+        "Not everything here will ship. That's the point; it's a place to try and to fail quickly.",
+        "The experiments that survive tend to wander back to the Workshop one day."
+      ]
+    },
+    "portfolioContent": ["projects", "achievements"],
+    "transition": "Beyond the lab the ground rises toward a domed silhouette against the sky — climb on to the Observatory."
+  },
+  {
+    "id": "observatory",
+    "title": "The Observatory",
+    "question": "How do I think?",
+    "purpose": "Explain the developer's way of working and reasoning across their experience.",
+    "emotion": "reflective, deliberate, far-seeing",
+    "environment": "A stone rise crowned with an obelisk and a charting table, the whole valley laid out below for planning the road ahead.",
+    "requiredAssets": ["observatory-rise", "obelisk", "charting-table"],
+    "dialogue": {
+      "speaker": "Wren, the Guide",
+      "lines": [
+        "The Observatory — for charting where the work goes next.",
+        "From up here you can see how the pieces of a career line up over time.",
+        "Good thinking is mostly stepping back far enough to see the whole map."
+      ]
+    },
+    "portfolioContent": ["experience"],
+    "transition": "One last light waits at the end of the road, steady over the water — walk on to the Lighthouse."
+  },
+  {
+    "id": "lighthouse",
+    "title": "The Lighthouse",
+    "question": "Why should someone work with me?",
+    "purpose": "Close the journey with the value of collaborating with the developer and how to reach them.",
+    "emotion": "assured, generous, open-handed",
+    "environment": "A tall lighthouse at the path's end, its beam sweeping out over calm water as a steady signal for those looking to connect.",
+    "requiredAssets": ["lighthouse-tower", "signal-beam", "dock"],
+    "dialogue": {
+      "speaker": "Wren, the Guide",
+      "lines": [
+        "The Lighthouse — a steady signal for collaborators to find.",
+        "Working together should feel calm: clear trade-offs, simple systems, docs you can actually follow.",
+        "If the light reached you, follow it home — the links here are how you say hello."
+      ]
+    },
+    "portfolioContent": ["socials"],
+    "transition": "That's the whole road, traveller. Wander back to camp whenever you like — Wren will be waiting by the fire."
+  }
+]
