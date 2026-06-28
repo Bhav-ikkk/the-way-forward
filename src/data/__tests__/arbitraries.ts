@@ -130,14 +130,52 @@ const socialArb = fc
   })
   .map(compact);
 
+const chapterDialogueArb = fc.record({
+  speaker: reqString,
+  lines: stringArray,
+});
+
+const chapterArb = fc
+  .record({
+    id: reqString,
+    title: reqString,
+    question: reqString,
+    purpose: reqString,
+    emotion: reqString,
+    environment: reqString,
+    requiredAssets: stringArray,
+    dialogue: chapterDialogueArb,
+    portfolioContent: stringArray,
+    transition: reqString,
+  })
+  .map(compact);
+
+const timelineEventArb = fc
+  .record({
+    id: reqString,
+    date: reqString,
+    title: reqString,
+    description: reqString,
+    kind: optString,
+  })
+  .map(compact);
+
+const dialogueArb = fc
+  .record({
+    id: reqString,
+    speaker: reqString,
+    lines: stringArray,
+  })
+  .map(compact);
+
 // Array files are generated non-empty (minLength: 1) so single-field mutations
 // in P2 always have an element to target.
 const nonEmpty = <T>(arb: fc.Arbitrary<T>) =>
   fc.array(arb, { minLength: 1, maxLength: 4 });
 
 /**
- * Arbitrary producing a complete, schema-conforming dataset (all eight
- * Data_Files present and valid).
+ * Arbitrary producing a complete, schema-conforming dataset (all Data_Files
+ * present and valid).
  */
 export const datasetArb: fc.Arbitrary<Dataset> = fc.record({
   profile: profileArb,
@@ -148,6 +186,9 @@ export const datasetArb: fc.Arbitrary<Dataset> = fc.record({
   achievements: nonEmpty(achievementArb),
   settings: settingsArb,
   socials: nonEmpty(socialArb),
+  chapters: nonEmpty(chapterArb),
+  timeline: nonEmpty(timelineEventArb),
+  dialogues: nonEmpty(dialogueArb),
 }) as unknown as fc.Arbitrary<Dataset>;
 
 /** Convenience typed view used by the round-trip assertion. */
@@ -215,6 +256,26 @@ export const requiredFields: RequiredFieldRef[] = [
   { file: "socials", isArray: true, field: "platform" },
   { file: "socials", isArray: true, field: "label" },
   { file: "socials", isArray: true, field: "url" },
+  // chapters (array element)
+  { file: "chapters", isArray: true, field: "id" },
+  { file: "chapters", isArray: true, field: "title" },
+  { file: "chapters", isArray: true, field: "question" },
+  { file: "chapters", isArray: true, field: "purpose" },
+  { file: "chapters", isArray: true, field: "emotion" },
+  { file: "chapters", isArray: true, field: "environment" },
+  { file: "chapters", isArray: true, field: "requiredAssets" },
+  { file: "chapters", isArray: true, field: "dialogue" },
+  { file: "chapters", isArray: true, field: "portfolioContent" },
+  { file: "chapters", isArray: true, field: "transition" },
+  // timeline (array element)
+  { file: "timeline", isArray: true, field: "id" },
+  { file: "timeline", isArray: true, field: "date" },
+  { file: "timeline", isArray: true, field: "title" },
+  { file: "timeline", isArray: true, field: "description" },
+  // dialogues (array element)
+  { file: "dialogues", isArray: true, field: "id" },
+  { file: "dialogues", isArray: true, field: "speaker" },
+  { file: "dialogues", isArray: true, field: "lines" },
 ];
 
 export type MutationKind = "drop" | "wrongType";
