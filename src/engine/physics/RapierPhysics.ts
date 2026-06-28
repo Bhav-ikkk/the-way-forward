@@ -37,14 +37,15 @@ const GRAVITY_Y = -20;
 /**
  * Character capsule dimensions. A capsule is `2*halfHeight` of straight body
  * capped by two hemispheres of `radius`, so the total height is
- * `2*(halfHeight + radius)` ≈ 1.9u — a believable ~human silhouette against the
- * ~1.7u-tall character art. The capsule CENTRE therefore sits
- * `radius + halfHeight` above the feet (see {@link CAPSULE_CENTER_OFFSET}).
+ * `2*(halfHeight + radius)` = 3.0u — sized to match the player art after the
+ * pass-2 scale-up (LAYOUT.character.scale ≈ 1.75, giving a ~3.0u silhouette).
+ * The capsule CENTRE therefore sits `radius + halfHeight` above the feet (see
+ * {@link CAPSULE_CENTER_OFFSET}).
  */
-const CAPSULE_RADIUS = 0.35;
-const CAPSULE_HALF_HEIGHT = 0.6;
+const CAPSULE_RADIUS = 0.5;
+const CAPSULE_HALF_HEIGHT = 1.0;
 /** Vertical distance from the capsule centre down to the feet. */
-const CAPSULE_CENTER_OFFSET = CAPSULE_RADIUS + CAPSULE_HALF_HEIGHT; // 0.95
+const CAPSULE_CENTER_OFFSET = CAPSULE_RADIUS + CAPSULE_HALF_HEIGHT; // 1.5
 
 /** Collision gap kept between the character and the world (controller offset). */
 const CHARACTER_OFFSET = 0.02;
@@ -103,6 +104,16 @@ export interface Physics {
    * position (the capsule centre is offset upward automatically).
    */
   createCharacter(feet: Vec3Like): void;
+  /**
+   * Directly place the kinematic capsule at the given FEET position (the
+   * capsule centre is offset upward automatically). Used by the ON-RAILS
+   * movement model, which derives motion from the path spline rather than from
+   * physics integration: each frame the controller computes the spline position
+   * and snaps the capsule there so the physics state (and therefore the camera
+   * collision raycast filtering) stays consistent. No-op before
+   * {@link Physics.createCharacter}.
+   */
+  setCharacterPosition(feet: Vec3Like): void;
   /**
    * Move the character by a horizontal displacement (already dt-scaled),
    * applying gravity and resolving collisions. Returns the new capsule-centre
@@ -243,6 +254,20 @@ class RapierPhysics implements Physics {
     controller.setSlideEnabled(true);
     this.controller = controller;
 
+    this.verticalVelocity = 0;
+  }
+
+  setCharacterPosition(feet: Vec3Like): void {
+    const body = this.charBody;
+    if (!body) return;
+    // Snap the kinematic capsule centre to the on-rails feet position. We use
+    // setTranslation (not setNextKinematicTranslation) so the collider moves
+    // immediately and is correctly placed for this frame's camera raycast; the
+    // world step that follows keeps everything consistent.
+    body.setTranslation(
+      { x: feet.x, y: feet.y + CAPSULE_CENTER_OFFSET, z: feet.z },
+      true,
+    );
     this.verticalVelocity = 0;
   }
 
