@@ -8,6 +8,9 @@ import { educationsSchema, type Education } from "./education";
 import { achievementsSchema, type Achievement } from "./achievements";
 import { settingsSchema, type Settings } from "./settings";
 import { socialsSchema, type Social } from "./socials";
+import { chaptersSchema, type Chapter } from "./chapters";
+import { timelineSchema, type TimelineEvent } from "./timeline";
+import { dialoguesSchema, type Dialogue } from "./dialogues";
 
 export * from "./profile";
 export * from "./projects";
@@ -17,6 +20,9 @@ export * from "./education";
 export * from "./achievements";
 export * from "./settings";
 export * from "./socials";
+export * from "./chapters";
+export * from "./timeline";
+export * from "./dialogues";
 
 /**
  * The aggregate Portfolio shape — one property per Data_File.
@@ -32,6 +38,9 @@ export interface Portfolio {
   achievements: Achievement[];
   settings: Settings;
   socials: Social[];
+  chapters: Chapter[];
+  timeline: TimelineEvent[];
+  dialogues: Dialogue[];
 }
 
 /**
@@ -48,6 +57,9 @@ export const dataFileSchemas = {
   achievements: achievementsSchema,
   settings: settingsSchema,
   socials: socialsSchema,
+  chapters: chaptersSchema,
+  timeline: timelineSchema,
+  dialogues: dialoguesSchema,
 } as const;
 
 /** A Data_File key (e.g. "profile", "projects"). */
@@ -63,6 +75,9 @@ export type DataFileShapes = {
   achievements: Achievement[];
   settings: Settings;
   socials: Social[];
+  chapters: Chapter[];
+  timeline: TimelineEvent[];
+  dialogues: Dialogue[];
 };
 
 /** A generic Zod schema alias used by the loader's `validateFile`. */
