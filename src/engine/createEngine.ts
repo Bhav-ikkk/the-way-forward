@@ -113,7 +113,9 @@ export function createEngine(
     controller = new CharacterController(app, char, world.camera, {
       checkpoints: world.checkpoints,
       onCheckpointChange: options.onCheckpointChange,
-      initialYaw: world.spawnYaw,
+      path: world.path,
+      initialDistance: world.spawnDistance,
+      mouse: app.mouse,
     });
     linkPhysicsToCharacter();
   });
