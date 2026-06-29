@@ -1,22 +1,33 @@
 import type * as pc from "playcanvas";
 
 import type { Path } from "./path";
-import { BRIDGE_CROSSING_T, SPAWN_T } from "./landmarks";
+import {
+  BRIDGE_CROSSING_T,
+  computeEntrances,
+  SPAWN_T,
+} from "./landmarks";
 import {
   addPointLight,
   LAYOUT,
-  layStripAlongPath,
   loadModelInstances,
-  makeMaterial,
+  type Placement,
   yawFromDir,
 } from "./shared";
 import type { ColliderSpec } from "./types";
 
 /**
- * Road system: the winding visual walking path, the wayfinding lanterns that
- * line it, and — critically for pass 1 — the INVISIBLE path-edge confinement
- * wall collider specs that keep the player on the corridor (out of the grass /
- * hills and out of the river).
+ * Road system: the HANDCRAFTED dirt road laid along the path spline, the
+ * per-building entrance PLAZAS where it widens into a paved court, the
+ * wayfinding lanterns that line it, and — critically for pass 1 — the INVISIBLE
+ * path-edge confinement wall collider specs that keep the player on the
+ * corridor (out of the grass / ridges and out of the river).
+ *
+ * Pass-2 Stage-1 retired the old procedural tan box strip: the road is now a
+ * ribbon of the curated `road_straight.glb` dirt tile, scaled to a CONSISTENT
+ * width and oriented to the path tangent so the edges stay clean around the
+ * bends, and at EACH building the road WIDENS into a small court of `road_tile`
+ * paving that connects the through-road to the door — so every location reads
+ * as a destination the road arrives at, not a path passing by.
  *
  * No physics is built here; the walls are emitted purely as {@link ColliderSpec}
  * data (role `"wall"`) for the later Rapier pass. Walls follow the path spline,
@@ -29,22 +40,93 @@ export function buildRoad(
   path: Path,
   colliders: ColliderSpec[],
 ): void {
-  // ---- Winding visual path (tan segments oriented to the tangent) --------
-  layStripAlongPath(
-    app,
-    path,
-    LAYOUT.path.segments,
-    makeMaterial(LAYOUT.path.color),
-    LAYOUT.path.width,
-    LAYOUT.path.thickness,
-    LAYOUT.path.y,
-  );
+  // ---- Handcrafted dirt-road ribbon (tiles oriented to the tangent) ------
+  layRoadRibbon(app, path);
+
+  // ---- Per-building entrance plazas (the road widens into a court) -------
+  buildEntrancePlazas(app, path);
 
   // ---- Wayfinding lanterns lining the path -------------------------------
   buildLanterns(app, path);
 
   // ---- Invisible path-edge confinement walls (collider specs only) -------
   buildConfinementWalls(path, colliders);
+}
+
+/**
+ * Lay the dirt road as a ribbon of `road_straight.glb` tiles along the spline.
+ *
+ * Each tile spans one arc-length-even segment: it is centred on the segment
+ * midpoint, oriented to the local tangent (so the road's long axis follows the
+ * curve), scaled to the CONSISTENT road width across, and scaled along travel
+ * to the segment length (with a small overlap so the curve seams never gap).
+ * One GLB fetch fans out to all tiles via {@link loadModelInstances}.
+ */
+function layRoadRibbon(app: pc.AppBase, path: Path): void {
+  const { width, roadModel, roadTileLength, roadSegments, roadOverlap, roadY } =
+    LAYOUT.path;
+  const pts = path.getEvenlySpacedPoints(roadSegments + 1);
+  const tiles: Placement[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i].position;
+    const b = pts[i + 1].position;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-4) continue;
+    tiles.push({
+      position: [(a.x + b.x) / 2, roadY, (a.z + b.z) / 2],
+      yaw: yawFromDir(dx, dz),
+      // Native tile is 1u wide × roadTileLength long; scale X to the road
+      // width and Z to the segment length (+overlap) so it tiles cleanly.
+      scale: [width, 1, (len / roadTileLength) * roadOverlap],
+    });
+  }
+  loadModelInstances(app, roadModel, tiles);
+}
+
+/**
+ * At each building (the five chapters + the arrival camp) lay a small paved
+ * COURT of `road_tile` paving spanning from the road centreline out to the
+ * building's front door, WIDER than the road, so the road reads as widening
+ * into an entrance/plaza the location is reached through. The court is a tight
+ * grid laid in the building's frame (along the path tangent × into the door),
+ * each tile oriented to the frame; one GLB fetch fans out across all courts.
+ */
+function buildEntrancePlazas(app: pc.AppBase, path: Path): void {
+  const { tileModel, tileNative, cols, rows, halfAlong, overlap, y } =
+    LAYOUT.plaza;
+  const tiles: Placement[] = [];
+
+  for (const e of computeEntrances(path)) {
+    // Court depth runs from the road centreline (spur root) to the front door.
+    const depth = Math.hypot(e.doorX - e.pathX, e.doorZ - e.pathZ);
+    if (depth < 1e-3) continue;
+    const tileYaw = yawFromDir(e.alongX, e.alongZ);
+    const alongStep = (2 * halfAlong) / cols;
+    const intoStep = depth / rows;
+
+    for (let c = 0; c < cols; c++) {
+      const along = -halfAlong + (c + 0.5) * alongStep;
+      for (let r = 0; r < rows; r++) {
+        const into = (r + 0.5) * intoStep;
+        const x = e.pathX + e.alongX * along + e.intoX * into;
+        const z = e.pathZ + e.alongZ * along + e.intoZ * into;
+        tiles.push({
+          position: [x, y, z],
+          yaw: tileYaw,
+          // Native tile is tileNative square; scale local Z→along, local X→into.
+          scale: [
+            (intoStep / tileNative) * overlap,
+            1,
+            (alongStep / tileNative) * overlap,
+          ],
+        });
+      }
+    }
+  }
+
+  loadModelInstances(app, tileModel, tiles);
 }
 
 /**
