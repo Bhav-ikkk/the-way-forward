@@ -1,6 +1,7 @@
 import * as pc from "playcanvas";
 
 import type { Physics } from "./physics";
+import { CHARACTER } from "./world/character.config";
 
 /**
  * A premium cinematic third-person orbit camera.
@@ -99,8 +100,9 @@ const RECENTER_DELAY = 3.5;
 const RECENTER_SPRING = 2.2;
 
 /** Look-target + ray origin height above the player's feet (world units).
- * Raised in pass 2 to frame the taller ~3.0u player at chest/head height. */
-const HEAD_HEIGHT = 2.5;
+ * Sourced from the single character config so it tracks the player silhouette;
+ * sits at chest/shoulder height of the ~3.0u animated player. */
+const HEAD_HEIGHT = CHARACTER.headHeight;
 /** Keep the camera this far off any surface it would otherwise clip. */
 const COLLISION_MARGIN = 0.4;
 /** Never let the corrected pull-in get closer to the head than this. */
