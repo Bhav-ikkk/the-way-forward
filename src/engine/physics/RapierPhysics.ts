@@ -27,6 +27,7 @@
 
 import type * as RapierNamespace from "@dimforge/rapier3d-compat";
 
+import { CHARACTER } from "../world/character.config";
 import type { ColliderSpec } from "../world/types";
 
 // ---- Tunable constants (adjust here) -------------------------------------
@@ -37,13 +38,15 @@ const GRAVITY_Y = -20;
 /**
  * Character capsule dimensions. A capsule is `2*halfHeight` of straight body
  * capped by two hemispheres of `radius`, so the total height is
- * `2*(halfHeight + radius)` = 3.0u — sized to match the player art after the
- * pass-2 scale-up (LAYOUT.character.scale ≈ 1.75, giving a ~3.0u silhouette).
- * The capsule CENTRE therefore sits `radius + halfHeight` above the feet (see
- * {@link CAPSULE_CENTER_OFFSET}).
+ * `2*(halfHeight + radius)` — sized to match the player art via the single
+ * character config ({@link CHARACTER.capsule}). With the default tuning that is
+ * `2*(1.08 + 0.42)` = 3.0u, matching the animated player's ~3.0u silhouette
+ * (CHARACTER.scale ≈ 1.7). The capsule CENTRE sits `radius + halfHeight` above
+ * the feet (see {@link CAPSULE_CENTER_OFFSET}). Edit character.config.ts (not
+ * here) to retune for a future model.
  */
-const CAPSULE_RADIUS = 0.5;
-const CAPSULE_HALF_HEIGHT = 1.0;
+const CAPSULE_RADIUS = CHARACTER.capsule.radius;
+const CAPSULE_HALF_HEIGHT = CHARACTER.capsule.halfHeight;
 /** Vertical distance from the capsule centre down to the feet. */
 const CAPSULE_CENTER_OFFSET = CAPSULE_RADIUS + CAPSULE_HALF_HEIGHT; // 1.5
 
