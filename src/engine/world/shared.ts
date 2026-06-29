@@ -1,5 +1,6 @@
 import * as pc from "playcanvas";
 
+import { CHARACTER } from "./character.config";
 import type { MarkerKind } from "./landmarks";
 
 /**
@@ -42,6 +43,15 @@ export const LAYOUT = {
      * confinement walls sit. Wall offset from centreline = width/2 + shoulder.
      */
     shoulder: 1.1,
+    /**
+     * Extra keep-clear margin (beyond the path half-width) that defines the
+     * ROAD CORRIDOR no scatter/foliage/rock/prop may intrude into, so the road
+     * surface + its immediate edges stay visually clean. Road half-width +
+     * this margin = the exclusion half-width used by {@link ./nature}. Lanterns
+     * /benches/fences that intentionally LINE the road sit on the shoulder just
+     * outside this margin.
+     */
+    clearMargin: 1.4,
     /** Height (full) of the invisible confinement walls. */
     wallHeight: 3,
     /** Thinness (half-extent across) of the confinement walls. */
@@ -51,6 +61,55 @@ export const LAYOUT = {
      * spawn clearing/camp feels open rather than fenced in.
      */
     spawnGap: [0, 0.13] as const,
+    // ---- Handcrafted dirt road (Pass-2 Stage-1) --------------------------
+    /**
+     * Curated dirt-road model laid as a tiled ribbon along the path spline
+     * (replaces the old procedural tan box strip). `road_straight.glb` is
+     * authored 1u wide × 2u long along its local +Z, lying flat with its top
+     * at y≈0.05, so it tiles cleanly when scaled to the road width and oriented
+     * to the path tangent.
+     */
+    roadModel: "/models/road_straight.glb",
+    /** Native length (local Z) of one `road_straight.glb` tile. */
+    roadTileLength: 2,
+    /**
+     * Segments laid along the spline for the dirt-road ribbon. Higher = smoother
+     * tiling around the bends (each tile spans one segment, oriented + scaled to
+     * the local tangent so the width stays CONSTANT and the edges stay clean).
+     */
+    roadSegments: 80,
+    /** Per-tile overlap factor so curve seams never show a gap. */
+    roadOverlap: 1.12,
+    /**
+     * Road surface placement height. Sits just above the ground plane and BELOW
+     * the bridge deck (LAYOUT.bridge.y = 0.12) so the deck reads cleanly on top
+     * where the road passes under the crossing.
+     */
+    roadY: 0.04,
+  },
+  /**
+   * Per-building ENTRANCE PLAZA: where the road WIDENS into a small paved court
+   * connecting the through-road to the building's door, so each location reads
+   * as a destination the road ARRIVES at rather than a thin path passing by.
+   * The court is a tight grid of the curated dirt tile (`road_tile.glb`, a 0.5u
+   * square) laid flat in the building's frame, spanning from the road centreline
+   * out to the building's front door. All values are tunable.
+   */
+  plaza: {
+    /** Curated square dirt tile used to pave the court. */
+    tileModel: "/models/road_tile.glb",
+    /** Native edge length (local X and Z) of one `road_tile.glb`. */
+    tileNative: 0.5,
+    /** Court grid columns (across, along the path tangent). */
+    cols: 6,
+    /** Court grid rows (depth, from the road toward the building door). */
+    rows: 5,
+    /** Half-width (along the tangent) of the court — wider than the road. */
+    halfAlong: 4.4,
+    /** Tile overlap factor so the paved court shows no seams. */
+    overlap: 1.06,
+    /** Court surface height (just above the road ribbon, below the building pad). */
+    y: 0.05,
   },
   river: {
     width: 7,
@@ -65,6 +124,29 @@ export const LAYOUT = {
     color: [0.18, 0.42, 0.78] as const,
     opacity: 0.78,
     segments: 48,
+    // ---- Pass-2 Stage-3 natural-river dressing ---------------------------
+    /**
+     * Darker deep-channel colour laid as a WIDER, slightly LOWER bed beneath
+     * the translucent surface so the river reads with depth (a dark centre
+     * fading to the lighter blue surface) instead of a flat coloured slab.
+     */
+    deepColor: [0.08, 0.22, 0.46] as const,
+    /** Deep-bed width factor (relative to surface width). */
+    deepWidthFactor: 1.16,
+    /** Deep-bed sits just under the surface for a layered depth read. */
+    deepY: 0.02,
+    /** Muddy/sandy shoreline margin colour bordering the water on both banks. */
+    bankColor: [0.5, 0.43, 0.31] as const,
+    /** Lateral width of the sandy bank margin on EACH side of the water. */
+    bankWidth: 1.7,
+    /**
+     * Fraction the water width "breathes" along the river's length so the
+     * shoreline is never a perfectly parallel channel. Zeroed at the crossing
+     * (t≈0.5) so the bridge always spans a consistent, nominal width.
+     */
+    widthVariation: 0.26,
+    /** Segments laid for the bank margins (matches the surface for clean edges). */
+    bankSegments: 48,
   },
   bridge: {
     url: "/models/bridge.glb",
@@ -93,16 +175,28 @@ export const LAYOUT = {
      * sync.
      */
     halfDepth: 4.2,
+    // ---- Pass-2 Stage-3 grounding supports -------------------------------
+    /**
+     * Stone pillar model (roads-kit) planted in the water beneath the span on
+     * both sides of the deck, so the bridge reads as resting on supports rather
+     * than floating over the strip. Pure dressing (no colliders — the deck
+     * collider already carries the walkway physics).
+     */
+    pillarUrl: "/models/bridge_pillar.glb",
+    /** Pillar scale (tuned to rise from the water to just under the deck). */
+    pillarScale: 2.6,
+    /** Lateral offset of each pillar pair from the crossing centreline. */
+    pillarOffset: 2.0,
   },
   character: {
-    url: "/models/character.glb",
     /**
-     * Player model scale. Bumped ~25% in pass 2 (1.4 → 1.75) so the player
-     * reads more believably against the world and the new buildings; the
-     * physics capsule (total height ~3.0u) + camera head/boom offsets are tuned
-     * to match this larger ~3.0u-tall silhouette.
+     * Player model + scale are sourced from the single character config
+     * ({@link ./character.config}) so a model swap is a ONE-FILE edit. These
+     * fields are kept here only as the world-build's view onto that config;
+     * do not hardcode a different model/scale here.
      */
-    scale: 1.75,
+    url: CHARACTER.model,
+    scale: CHARACTER.scale,
   },
   marker: {
     /** Warm lantern/firepit glow. */
@@ -117,22 +211,26 @@ export const LAYOUT = {
     /**
      * Half-width of the FLAT walkable corridor around the path centreline.
      * Inside this band the terrain stays at y≈0 so movement/physics stays
-     * simple and the path never floats or clips. Hills only frame the journey
-     * beyond this band (it sits a little past the confinement walls).
+     * simple and the path never floats or clips. Sculpted ridge forms only
+     * frame the journey beyond this band.
      */
     corridorHalfWidth: 4.4,
-    /** Distance (beyond the corridor) over which hills ramp from 0 to full. */
+    /** Distance (beyond the corridor) over which the analytic baseline ramps. */
     hillRamp: 10,
-    /** Maximum (gentle) hill height in world units. */
+    /** Maximum (gentle) baseline hill height in world units (analytic field). */
     maxHeight: 4.2,
-    /** Spacing of the low-poly mound grid that frames the journey. */
-    moundSpacing: 9,
-    /** Mound material colour (deeper, slightly cooler green for layered depth). */
+    /**
+     * Pass-2 Stage-1 replaced the uniform field of small repeated mound spheres
+     * with a HANDFUL of large, sculpted ridge forms (see RIDGES in terrain.ts):
+     * big, elongated, deliberately placed hills — several large enough to BLOCK
+     * line of sight so upcoming chapters stay hidden until the road curves to
+     * reveal them. These two colours dress the near ridges (warm meadow green)
+     * and the distant backdrop ridges (cooler, rockier grey-green) for depth.
+     */
+    /** Near ridge material colour (deeper, slightly cooler green). */
     color: [0.31, 0.46, 0.23] as const,
-    /** A few taller, distant outcrop mounds that give the horizon shape. */
-    outcropColor: [0.44, 0.43, 0.39] as const,
-    /** Number of distant rock outcrops dressed onto the far hills. */
-    outcrops: 11,
+    /** Distant/backdrop ridge colour (cooler, rockier; reads through the haze). */
+    farColor: [0.42, 0.44, 0.4] as const,
   },
   /**
    * Atmosphere: a cohesive GOLDEN-HOUR mood — a gradient sky dome, distance fog
@@ -170,7 +268,7 @@ export const LAYOUT = {
    */
   decor: {
     /** Lateral band (from path centre) where ground detail is scattered. */
-    nearOffset: 2.4,
+    nearOffset: 3.2,
     farOffset: 8.5,
     /** Stations sampled along the path for ground detail (scales with the
      * longer pass-2 ribbon so the route stays dressed end-to-end). */
