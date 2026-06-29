@@ -6,6 +6,7 @@ import {
   type InteractionOptions,
 } from "./InteractionController";
 import type { Physics } from "./physics";
+import { CHARACTER } from "./world/character.config";
 import type { Path } from "./world/path";
 import type { Checkpoint, CheckpointInfo } from "./world/types";
 
@@ -28,10 +29,8 @@ const ACCEL_RATE = 6; // ease-in toward target speed (lower = floatier start)
 const DECEL_RATE = 8; // ease-out back to rest (a touch snappier than accel)
 /** Yaw catch-up rate for aligning the character to the path tangent. */
 const TURN_RATE = 10;
-/** Speed (units/s) below which the character is treated as idle (no bob). */
+/** Speed (units/s) below which the character is treated as idle. */
 const MOVE_EPSILON = 0.05;
-const BOB_FREQUENCY = 9; // walk bob cycles
-const BOB_HEIGHT = 0.14; // walk bob amplitude (scaled up slightly with the player)
 const BASE_Y = 0; // flat corridor: the player feet stay on the ground plane
 
 interface ControllerOptions {
@@ -71,7 +70,9 @@ function shortestAngleDelta(a: number, b: number): number {
  * and `s` is clamped to [0, length] so the player can never leave the path.
  * Each frame the character is placed at the sampled spline position (flat
  * corridor, y ≈ 0) and its yaw eases to the travel tangent (reversed when
- * retracing). A subtle walk bob is layered on as a pure VISUAL Y offset.
+ * retracing). The skinned player's locomotion is driven by writing the current
+ * absolute along-path speed into the anim `speed` float, so the state machine
+ * crossfades Idle⇄Run on its own (no procedural walk bob).
  *
  * Because the motion is constrained to the spline the player is inherently
  * confined to the path. When a {@link Physics} handle is attached the kinematic
@@ -106,7 +107,6 @@ export class CharacterController {
    */
   private touchDrive = 0;
   private yaw = 0;
-  private walkPhase = 0;
   private posX = 0;
   private posY = BASE_Y;
   private posZ = 0;
@@ -240,22 +240,24 @@ export class CharacterController {
       this.yaw += delta * Math.min(1, TURN_RATE * dt);
     }
 
-    // ---- Walk bob (visual only; idle when stopped) ----------------------
-    let bob = 0;
-    if (absSpeed > MOVE_EPSILON) {
-      this.walkPhase += dt * BOB_FREQUENCY;
-      bob = Math.abs(Math.sin(this.walkPhase)) * BOB_HEIGHT;
-    } else {
-      this.walkPhase = 0;
+    // ---- Drive the locomotion anim (idle ⇄ run via the speed float) -----
+    // The skinned player carries a programmatic Idle/Run state machine (see
+    // characterAnim.ts). We just feed it the current absolute along-path speed;
+    // it crossfades between states on its own. Guarded so a missing/failed anim
+    // component (graceful fallback) is a no-op — the player still renders/moves.
+    const anim = this.character.anim;
+    if (anim) {
+      anim.setFloat(CHARACTER.anim.speedParam, absSpeed);
     }
 
     // ---- Place the character + keep the capsule in sync -----------------
-    this.character.setLocalPosition(this.posX, this.posY + bob, this.posZ);
+    // No procedural bob: the real run cycle supplies the gait, so the feet stay
+    // planted on the rail (y = BASE_Y) and the animation does the rest.
+    this.character.setLocalPosition(this.posX, this.posY, this.posZ);
     this.character.setLocalEulerAngles(0, this.yaw, 0);
     if (this.physics) {
-      // Snap the kinematic capsule to the on-rails feet (no bob — physics state
-      // tracks the rail, the bob is purely a visual flourish), then step the
-      // world so the collider position is committed for the camera ray.
+      // Snap the kinematic capsule to the on-rails feet, then step the world so
+      // the collider position is committed for the camera ray.
       this.physics.setCharacterPosition({
         x: this.posX,
         y: this.posY,
