@@ -40,15 +40,18 @@ export interface SpawnResult {
  * Spawn system: the cozy, lived-in "Arrival" camp at the start of the journey.
  *
  * A campfire with a warm always-on glow sits at the heart of it, ringed by
- * benches, logs, and a circle of hearth stones. Framing trees/rocks anchor the
- * clearing, two lit lanterns mark the way out onto the path, a low fence guides
- * the eye toward the road, and tufts of grass / flowers / a mushroom or two
- * dress the ground so the camp feels inhabited rather than staged.
+ * benches, logs, bedrolls, and a circle of hearth stones. Framing trees/rocks
+ * anchor the clearing, camp stores (a woodpile, barrels, a crate) and a
+ * signpost dress the edges, two lit lanterns mark the way out onto the path, a
+ * low perimeter fence encloses the camp with a wide GATE opening toward the
+ * road, and tufts of grass / flowers / a mushroom or two dress the ground so
+ * the camp feels inhabited rather than staged.
  *
- * Solid set pieces the player can brush (trees, rocks, logs, fence line) emit
- * `"prop"` collider specs; the hearth stones and ground foliage are decorative
- * and carry none. The campfire's animated point light is registered as a
- * firepit {@link Marker} so it flickers like the checkpoint markers.
+ * Solid set pieces the player can brush (trees, rocks, logs, stores, fence
+ * posts) emit `"prop"` collider specs; the hearth stones, bedrolls, sign, and
+ * ground foliage are decorative and carry none. The campfire's animated point
+ * light is registered as a firepit {@link Marker} so it flickers like the
+ * checkpoint markers.
  */
 export function buildSpawn(
   app: pc.AppBase,
@@ -96,23 +99,34 @@ export function buildSpawn(
   }
   loadModelInstances(app, "/models/stone_small.glb", hearth);
 
-  // ---- Benches + logs as seating around the fire -------------------------
+  // ---- Benches + logs + bedrolls as seating around the fire --------------
   const benches: ScenerySpec[] = [
-    { url: "/models/bench.glb", position: [fireX + 2.6, 0, fireZ], yaw: 270, scale: 1.6 },
-    { url: "/models/bench.glb", position: [fireX, 0, fireZ - 2.6], yaw: 0, scale: 1.6 },
+    { url: "/models/bench.glb", position: [fireX + 2.7, 0, fireZ], yaw: 270, scale: 1.6 },
+    { url: "/models/bench.glb", position: [fireX, 0, fireZ - 2.7], yaw: 0, scale: 1.6 },
+    { url: "/models/bedroll.glb", position: [fireX - 2.5, 0, fireZ - 1.4], yaw: 55, scale: 1.5 },
+    { url: "/models/bedroll.glb", position: [fireX + 1.4, 0, fireZ + 2.5], yaw: 200, scale: 1.5 },
   ];
 
-  // ---- Framing trees / rocks / logs / sign (solid pieces get colliders) --
+  // ---- Framing trees / rocks / logs / stores / sign ----------------------
+  // Solid pieces get colliders; bedrolls/sign stay decorative.
   const framing: Array<ScenerySpec & { collider?: [number, number, number] }> = [
-    { url: "/models/tree_oak.glb", position: [fireX - 6, 0, fireZ - 4], yaw: 20, scale: 2.6, collider: [0.4, 2.5, 0.4] },
-    { url: "/models/tree_pine.glb", position: [fireX + 6, 0, fireZ - 5], yaw: 200, scale: 3.0, collider: [0.4, 3, 0.4] },
-    { url: "/models/tree_oak.glb", position: [fireX + 7, 0, fireZ + 4], yaw: 120, scale: 2.4, collider: [0.4, 2.4, 0.4] },
-    { url: "/models/rock_large.glb", position: [fireX - 5, 0, fireZ + 3], yaw: 0, scale: 1.8, collider: [0.9, 0.7, 0.9] },
-    { url: "/models/rock_small.glb", position: [fireX + 4, 0, fireZ + 2.5], yaw: 60, scale: 1.6, collider: [0.6, 0.5, 0.6] },
+    { url: "/models/tree_oak.glb", position: [fireX - 6.5, 0, fireZ - 4], yaw: 20, scale: 2.8, collider: [0.4, 2.7, 0.4] },
+    { url: "/models/tree_pine_big.glb", position: [fireX + 6.5, 0, fireZ - 5], yaw: 200, scale: 3.2, collider: [0.4, 3.2, 0.4] },
+    { url: "/models/tree_oak.glb", position: [fireX + 7, 0, fireZ + 4.5], yaw: 120, scale: 2.6, collider: [0.4, 2.6, 0.4] },
+    { url: "/models/tree_pine.glb", position: [fireX - 6, 0, fireZ + 5], yaw: 60, scale: 3.0, collider: [0.4, 3.0, 0.4] },
+    { url: "/models/rock_large.glb", position: [fireX - 5.5, 0, fireZ + 3], yaw: 0, scale: 1.8, collider: [0.9, 0.7, 0.9] },
+    { url: "/models/rock_small.glb", position: [fireX + 4, 0, fireZ + 2.8], yaw: 60, scale: 1.6, collider: [0.6, 0.5, 0.6] },
     // Felled logs as rustic seating beside the fire.
-    { url: "/models/log.glb", position: [fireX - 2.4, 0, fireZ + 0.6], yaw: 100, scale: 1.5, collider: [0.9, 0.35, 0.4] },
-    { url: "/models/log.glb", position: [fireX + 1.2, 0, fireZ + 2.4], yaw: 20, scale: 1.4, collider: [0.85, 0.35, 0.4] },
-    { url: "/models/sign.glb", position: [fireX + 3.5, 0, fireZ + 3.5], yaw: 200, scale: 1.5 },
+    { url: "/models/log.glb", position: [fireX - 2.6, 0, fireZ + 0.8], yaw: 100, scale: 1.5, collider: [0.9, 0.35, 0.4] },
+    { url: "/models/log.glb", position: [fireX + 1.4, 0, fireZ - 1.6], yaw: 20, scale: 1.4, collider: [0.85, 0.35, 0.4] },
+    // Camp stores: a woodpile, barrels, a crate, and a chest tucked at the edges.
+    { url: "/models/woodpile.glb", position: [fireX - 4.6, 0, fireZ - 2.6], yaw: 30, scale: 1.6, collider: [1.1, 0.5, 0.5] },
+    { url: "/models/barrel.glb", position: [fireX + 3.6, 0, fireZ - 3.0], yaw: 0, scale: 1.4, collider: [0.5, 0.7, 0.5] },
+    { url: "/models/barrel_open.glb", position: [fireX + 4.4, 0, fireZ - 2.2], yaw: 0, scale: 1.3, collider: [0.5, 0.6, 0.5] },
+    { url: "/models/crate.glb", position: [fireX - 4.0, 0, fireZ + 2.2], yaw: 25, scale: 1.4, collider: [0.5, 0.5, 0.5] },
+    // A signpost pointing the way down the road, near the camp gate.
+    { url: "/models/signpost_s.glb", position: [fireX + 5.0, 0, fireZ + 1.4], yaw: 240, scale: 1.7 },
+    { url: "/models/sign.glb", position: [fireX + 3.5, 0, fireZ + 3.8], yaw: 200, scale: 1.5 },
   ];
 
   for (const s of [...benches, ...framing]) {
@@ -139,8 +153,8 @@ export function buildSpawn(
   // ---- Two lit lanterns marking the way out onto the path ---------------
   buildCampLanterns(app, path);
 
-  // ---- Low fence guiding the eye from the camp toward the road ----------
-  buildCampFence(app, path, colliders);
+  // ---- Enclosing perimeter fence with a gate toward the road ------------
+  buildCampPerimeter(app, path, fireX, fireZ, colliders);
 
   // ---- Ground foliage so the camp feels lived-in (decorative) -----------
   // The camp dresses around its OWN fire, but still keeps clear of the cabin +
@@ -223,41 +237,64 @@ function buildCampLanterns(app: pc.AppBase, path: Path): void {
 }
 
 /**
- * A short, low fence line along the RIGHT shoulder of the path as it leaves the
- * camp (the side away from the fire), with a corner post at the camp end — a
- * leading line that reinforces "stay on the path". Emits low `"prop"` colliders
- * so it stays consistent with the physics world.
+ * A low fence ENCLOSING the spawn camp in an arc around the camp heart (the
+ * fire), with a wide GATE opening facing the road so the camp reads as a
+ * lived-in, defined clearing the player steps out of onto the journey. Posts
+ * follow a circle around the fire; the wedge facing the path is left open and a
+ * `fence_gate` is set in it. Solid posts emit low `"prop"` colliders; the open
+ * gate carries none so the on-rails path passes straight through.
  */
-function buildCampFence(app: pc.AppBase, path: Path, colliders: ColliderSpec[]): void {
-  const off = LAYOUT.path.width / 2 + 0.7;
-  const posts: Placement[] = [];
-  const corners: Placement[] = [];
+function buildCampPerimeter(
+  app: pc.AppBase,
+  path: Path,
+  fireX: number,
+  fireZ: number,
+  colliders: ColliderSpec[],
+): void {
+  const clearing = path.sample(SPAWN_CLEARING_T).position;
+  // Direction from the fire toward the path/road (where the gate opens).
+  const gateAngle = Math.atan2(clearing.z - fireZ, clearing.x - fireX);
+  const R = 6.4; // perimeter radius around the fire
+  const N = 16; // posts around the full circle (the gate wedge is skipped)
+  const gateHalf = 1.05; // half-angle (rad, ~60°) of the open gate wedge
+  const step = (Math.PI * 2) / N;
 
-  const ts = [0.055, 0.08, 0.105, 0.13];
+  const posts: Placement[] = [];
   let idx = 0;
-  for (let k = 0; k < ts.length; k++) {
-    const s = path.sample(ts[k]);
-    const rightX = s.tangent.z;
-    const rightZ = -s.tangent.x;
-    const x = s.position.x + rightX * off;
-    const z = s.position.z + rightZ * off;
-    const yaw = yawFromDir(s.tangent.x, s.tangent.z);
-    if (k === 0) {
-      corners.push({ position: [x, 0, z], yaw, scale: 1.4 });
-    } else {
-      posts.push({ position: [x, 0, z], yaw, scale: 1.4 });
-    }
+  for (let i = 0; i < N; i++) {
+    const a = i * step;
+    // Angular distance to the gate direction, wrapped to [-π, π].
+    let d = a - gateAngle;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    if (Math.abs(d) < gateHalf) continue; // leave the gate wedge open
+
+    const x = fireX + Math.cos(a) * R;
+    const z = fireZ + Math.sin(a) * R;
+    // Orient each panel tangent to the circle (its length lies along +Z).
+    const tanX = -Math.sin(a);
+    const tanZ = Math.cos(a);
+    const yaw = yawFromDir(tanX, tanZ);
+    posts.push({ position: [x, 0, z], yaw, scale: 1.5 });
     colliders.push({
       id: `camp-fence-${idx++}`,
       type: "box",
       position: [x, 0.5, z],
-      halfExtents: [0.12, 0.5, 1.3],
+      halfExtents: [0.16, 0.5, (R * step) / 2 + 0.1],
       rotation: [0, yaw, 0],
       role: "prop",
     });
   }
-  loadModelInstances(app, "/models/fence.glb", posts);
-  loadModelInstances(app, "/models/fence_corner.glb", corners);
+  loadModelInstances(app, "/models/fence_wood.glb", posts);
+
+  // Open gate set in the wedge facing the road (no collider — path runs through).
+  const gx = fireX + Math.cos(gateAngle) * R;
+  const gz = fireZ + Math.sin(gateAngle) * R;
+  const gTanX = -Math.sin(gateAngle);
+  const gTanZ = Math.cos(gateAngle);
+  loadModelInstances(app, "/models/fence_gate.glb", [
+    { position: [gx, 0, gz], yaw: yawFromDir(gTanX, gTanZ), scale: 1.6 },
+  ]);
 }
 
 /** Tufts of grass, flowers, bushes, and a mushroom dressing the camp ground. */
