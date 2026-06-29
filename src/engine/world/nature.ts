@@ -15,6 +15,7 @@ import {
   loadModelInstances,
   type Placement,
 } from "./shared";
+import { distanceToPath } from "./terrain";
 import type { ColliderSpec } from "./types";
 
 /**
@@ -84,6 +85,29 @@ const POIS: readonly number[] = [
   ...LANDMARKS.map((lm) => lm.t),
 ];
 
+/**
+ * Deliberate, DENSE occluder treelines that enforce the chapter REVEAL: a thick
+ * wall of tall pines set just beyond the shoulder along a path band + side, so
+ * an upcoming building is hidden behind the treeline until the road curves past
+ * it. These work together with the large terrain ridges ({@link ./terrain})
+ * that back them. Tunable: each band is `[tStart, tEnd]` with a `side`
+ * (+1 = right of travel, -1 = left).
+ *
+ * - Workshop band (right shoulder through the first bend): from spawn you see
+ *   the treeline, not the Workshop; it reveals as you round the bend.
+ * - Library band (left shoulder just past the bridge): the Library stays hidden
+ *   beyond the river until you have crossed and the road turns toward it.
+ */
+const OCCLUDER_TREELINES: readonly {
+  tStart: number;
+  tEnd: number;
+  side: 1 | -1;
+  note: string;
+}[] = [
+  { tStart: 0.115, tEnd: 0.205, side: 1, note: "hide Workshop from spawn until first bend" },
+  { tStart: 0.325, tEnd: 0.415, side: -1, note: "hide Library beyond the river until past the bridge" },
+];
+
 /** Nearness (0..1) to the closest point of interest; 1 == right on top of it. */
 function poiProximity(t: number): number {
   let min = Infinity;
@@ -116,9 +140,74 @@ export function buildNature(
   // Shared keep-clear apron around every building, computed from the same path
   // samples/offsets the structures use, so no scatter crowds a structure.
   const keepClear = computeKeepClearZones(path);
-  buildTreeFraming(app, path, colliders, keepClear);
-  buildRockFraming(app, path, colliders, keepClear);
-  buildGroundDetail(app, path, keepClear);
+  // Road corridor: a sampled polyline + a keep-clear half-width so NOTHING
+  // (tree/rock/ground detail) is ever placed on or against the road surface,
+  // even where the path bends back toward a previously-placed point. Lanterns
+  // /benches that line the road sit just outside this margin (handled by the
+  // road/spawn systems), never inside it.
+  const roadPoly = path
+    .getEvenlySpacedPoints(121)
+    .map((s) => ({ x: s.position.x, z: s.position.z }));
+  const roadHalf = LAYOUT.path.width / 2 + LAYOUT.path.clearMargin;
+  /** True if (x,z) intrudes onto the clean road corridor. */
+  const onRoad = (x: number, z: number): boolean =>
+    distanceToPath(x, z, roadPoly) < roadHalf;
+
+  buildTreeFraming(app, path, colliders, keepClear, onRoad);
+  buildRockFraming(app, path, colliders, keepClear, onRoad);
+  buildGroundDetail(app, path, keepClear, onRoad);
+  buildOccluderTreelines(app, path, keepClear, onRoad);
+}
+
+/**
+ * Place the DENSE reveal-enforcing treelines (see {@link OCCLUDER_TREELINES}).
+ * Three staggered rows of tall pines just beyond the shoulder form a solid
+ * silhouette wall along each band. Deterministic (hash-based), respects the
+ * building keep-clear aprons + the clean road corridor, and emits NO colliders
+ * (the player is already held on the corridor by the confinement walls).
+ */
+function buildOccluderTreelines(
+  app: pc.AppBase,
+  path: Path,
+  keepClear: readonly KeepClearZone[],
+  onRoad: (x: number, z: number) => boolean,
+): void {
+  const shoulder = LAYOUT.path.width / 2 + LAYOUT.path.shoulder; // ~2.8
+  const STEPS = 16;
+  const tall: Placement[] = [];
+  const pine: Placement[] = [];
+
+  for (let b = 0; b < OCCLUDER_TREELINES.length; b++) {
+    const band = OCCLUDER_TREELINES[b];
+    for (let i = 0; i <= STEPS; i++) {
+      const t = band.tStart + (band.tEnd - band.tStart) * (i / STEPS);
+      const s = path.sample(t);
+      const rightX = s.tangent.z;
+      const rightZ = -s.tangent.x;
+      // Three staggered rows building outward from the shoulder = dense wall.
+      for (let row = 0; row < 3; row++) {
+        const seed = b * 1000 + i * 7 + row * 3;
+        const offset = shoulder + 1.3 + row * 2.0 + hash01(seed * 1.7) * 0.8;
+        const jAlong = (hash01(seed * 2.3) - 0.5) * 1.7;
+        const x = s.position.x + rightX * offset * band.side + s.tangent.x * jAlong;
+        const z = s.position.z + rightZ * offset * band.side + s.tangent.z * jAlong;
+        if (isInKeepClear(x, z, keepClear)) continue;
+        if (onRoad(x, z)) continue;
+        const h = hash01(seed * 9.7);
+        const p: Placement = {
+          position: [x, 0, z],
+          yaw: hash01(seed * 4.1) * 360,
+          scale: 3.0 + h * 1.2,
+        };
+        // Favour tall pines for a solid wall; mix a few standard pines.
+        if (hash01(seed * 5.5) < 0.7) tall.push(p);
+        else pine.push(p);
+      }
+    }
+  }
+
+  loadModelInstances(app, "/models/tree_pine_tall.glb", tall);
+  loadModelInstances(app, "/models/tree_pine.glb", pine);
 }
 
 /**
@@ -130,6 +219,7 @@ function buildTreeFraming(
   path: Path,
   colliders: ColliderSpec[],
   keepClear: readonly KeepClearZone[],
+  onRoad: (x: number, z: number) => boolean,
 ): void {
   const shoulder = LAYOUT.path.width / 2 + LAYOUT.path.shoulder; // ~2.8
   // Stations + tree budget scale with the path length so the longer pass-2
@@ -185,8 +275,10 @@ function buildTreeFraming(
         const x = s.position.x + rightX * offset * side + s.tangent.x * along;
         const z = s.position.z + rightZ * offset * side + s.tangent.z * along;
 
-        // Skip anything that would crowd a building's clean apron.
+        // Skip anything that would crowd a building's clean apron or intrude
+        // onto the clean road corridor.
         if (isInKeepClear(x, z, keepClear)) continue;
+        if (onRoad(x, z)) continue;
 
         // Pick a silhouette: tall pines favoured deep, oaks/pines near; the
         // accent tree appears only rarely and only in the far band.
@@ -225,6 +317,7 @@ function buildRockFraming(
   path: Path,
   colliders: ColliderSpec[],
   keepClear: readonly KeepClearZone[],
+  onRoad: (x: number, z: number) => boolean,
 ): void {
   const shoulder = LAYOUT.path.width / 2 + LAYOUT.path.shoulder;
   const length = path.length();
@@ -260,8 +353,9 @@ function buildRockFraming(
     const offset = shoulder + 1.0 + h2 * 2.5;
     const x = s.position.x + rightX * offset * side;
     const z = s.position.z + rightZ * offset * side;
-    // Skip rocks that would crowd a building's clean apron.
+    // Skip rocks that would crowd a building's clean apron or sit on the road.
     if (isInKeepClear(x, z, keepClear)) continue;
+    if (onRoad(x, z)) continue;
     const scale = kind.minScale + h * (kind.maxScale - kind.minScale);
     const yaw = hash01(i * 3.3) * 360;
 
@@ -295,6 +389,7 @@ function buildGroundDetail(
   app: pc.AppBase,
   path: Path,
   keepClear: readonly KeepClearZone[],
+  onRoad: (x: number, z: number) => boolean,
 ): void {
   const { nearOffset, farOffset, stations } = LAYOUT.decor;
 
@@ -335,8 +430,10 @@ function buildGroundDetail(
         const along = (h2 - 0.5) * 3.0;
         const x = s.position.x + rightX * offset * side + s.tangent.x * along;
         const z = s.position.z + rightZ * offset * side + s.tangent.z * along;
-        // Skip ground detail that would clutter a building's clean apron.
+        // Skip ground detail that would clutter a building's clean apron or
+        // sit on the clean road corridor.
         if (isInKeepClear(x, z, keepClear)) continue;
+        if (onRoad(x, z)) continue;
         const yaw = h3 * 360;
         const scale = 0.9 + h * 0.7;
 
