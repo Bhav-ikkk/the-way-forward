@@ -38,6 +38,19 @@ interface InfoPanelProps {
   onClose: () => void;
 }
 
+/**
+ * Entrance animations for the info panel: the backdrop fades the world out
+ * slightly while the panel pops in. One injected stylesheet because inline
+ * styles cannot declare `@keyframes`.
+ */
+const PANEL_KEYFRAMES = `
+@keyframes panelFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panelPopIn {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+`;
+
 export function InfoPanel({ model, onClose }: InfoPanelProps) {
   // Close on Esc whenever the panel is open.
   useEffect(() => {
@@ -69,8 +82,10 @@ export function InfoPanel({ model, onClose }: InfoPanelProps) {
         WebkitBackdropFilter: theme.blurSoft,
         backdropFilter: theme.blurSoft,
         pointerEvents: "auto",
+        animation: "panelFadeIn 220ms ease-out both",
       }}
     >
+      <style>{PANEL_KEYFRAMES}</style>
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
@@ -86,6 +101,7 @@ export function InfoPanel({ model, onClose }: InfoPanelProps) {
           boxShadow: theme.shadow,
           color: theme.text,
           overflow: "hidden",
+          animation: "panelPopIn 340ms cubic-bezier(0.22,1,0.36,1) both",
         }}
       >
         {/* Header: chapter title + question, with a close button. */}
