@@ -1,5 +1,6 @@
 import * as pc from "playcanvas";
 
+import { CHARACTER } from "./world/character.config";
 import type { Interactable, InteractableInfo } from "./world/types";
 
 /**
@@ -30,8 +31,9 @@ export interface InteractionOptions {
 
 /** Ease rate (per second) the subtle highlight fades in/out. */
 const HIGHLIGHT_RAMP = 6;
-/** Height (world units) of the nameplate above the player's feet. */
-const NAMEPLATE_HEAD_HEIGHT = 3.4;
+/** Height (world units) of the nameplate above the player's feet. Sourced from
+ * the single character config so it tracks the player's head height. */
+const NAMEPLATE_HEAD_HEIGHT = CHARACTER.nameplateHeight;
 /** A click/tap counts as "enter" only if it moved less than this (CSS px). */
 const TAP_MAX_MOVE = 8;
 /** …and lasted less than this (ms) — longer/larger gestures are camera drags. */
