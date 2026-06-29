@@ -1,13 +1,18 @@
 "use client";
 
 /**
- * Floating, screen-space nameplate that hovers above the player's head.
+ * Floating, multiplayer-style nametag that hovers just above the player's head.
  *
  * The engine projects the player's head world position to screen coordinates
  * each frame (via `camera.worldToScreen`) and reports `{ x, y, visible }`; this
- * component simply renders a small dark-glass card at that position. Because it
- * is screen-space it always faces the camera. The name + title come from the
- * validated portfolio profile (content), never hardcoded.
+ * component renders a small dark-glass pill at that position with the player's
+ * NAME and a little downward-pointing arrow (▼) beneath it — exactly like the
+ * name tags floating over players in multiplayer games. Because it is
+ * screen-space it always faces the camera.
+ *
+ * Per owner feedback this is intentionally minimal: just the name (from the
+ * validated profile content) + the arrow. There is NO title / role line. The
+ * caller hides it while a panel or the welcome card is open.
  *
  * It does NOT import `playcanvas` — it only receives plain numbers/strings.
  */
@@ -22,15 +27,16 @@ export interface NameplatePosition {
 interface NameplateProps {
   /** Screen placement reported by the engine (CSS pixels). */
   position: NameplatePosition | null;
-  /** Player display name (profile.name). */
+  /** Player display name (profile.name) — the only text shown. */
   name: string;
-  /** Player title (profile.title). */
-  title: string;
   /** Hidden by the caller while a panel is open or the welcome card is up. */
   hidden?: boolean;
 }
 
-export function Nameplate({ position, name, title, hidden }: NameplateProps) {
+/** Arrow size (px) of the downward pointer beneath the name pill. */
+const ARROW = 7;
+
+export function Nameplate({ position, name, hidden }: NameplateProps) {
   if (hidden || !position || !position.visible) return null;
 
   return (
@@ -41,42 +47,48 @@ export function Nameplate({ position, name, title, hidden }: NameplateProps) {
         left: position.x,
         top: position.y,
         zIndex: 20,
-        // Anchor the card's bottom-centre to the head, lifted slightly above it.
-        transform: "translate(-50%, calc(-100% - 18px))",
+        // Anchor the tag's bottom (its arrow tip) to the head, lifted slightly
+        // so the arrow points down AT the character like a multiplayer tag.
+        transform: "translate(-50%, calc(-100% - 14px))",
         pointerEvents: "none",
-        padding: "6px 12px",
-        borderRadius: theme.radiusChip,
-        background: theme.glass,
-        WebkitBackdropFilter: theme.blurSoft,
-        backdropFilter: theme.blurSoft,
-        border: `1px solid ${theme.border}`,
-        boxShadow: theme.shadowSoft,
-        textAlign: "center",
-        whiteSpace: "nowrap",
-        lineHeight: 1.2,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
       }}
     >
+      {/* The name pill: a crisp, subtle dark-glass chip. */}
       <div
         style={{
-          fontSize: 14,
+          padding: "4px 11px 5px",
+          borderRadius: theme.radiusChip,
+          background: theme.glassStrong,
+          WebkitBackdropFilter: theme.blurSoft,
+          backdropFilter: theme.blurSoft,
+          border: `1px solid ${theme.border}`,
+          boxShadow: theme.shadowSoft,
+          whiteSpace: "nowrap",
+          fontFamily: theme.font,
+          fontSize: 13,
           fontWeight: 600,
           color: theme.text,
           letterSpacing: 0.2,
+          lineHeight: 1.1,
         }}
       >
         {name}
       </div>
+      {/* Downward arrow (▼) pointing at the head, tinted to match the pill. */}
       <div
         style={{
-          fontSize: 11,
-          color: theme.accent,
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          marginTop: 1,
+          width: 0,
+          height: 0,
+          marginTop: -1,
+          borderLeft: `${ARROW}px solid transparent`,
+          borderRight: `${ARROW}px solid transparent`,
+          borderTop: `${ARROW}px solid ${theme.glassStrong}`,
+          filter: `drop-shadow(0 1px 0 ${theme.border})`,
         }}
-      >
-        {title}
-      </div>
+      />
     </div>
   );
 }
