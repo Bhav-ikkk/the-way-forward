@@ -18,6 +18,28 @@
  */
 import { theme } from "./theme";
 
+/**
+ * Premium entrance animations for the HUD overlays. Kept as a single injected
+ * stylesheet because inline styles cannot declare `@keyframes`. Each surface
+ * references one of these by name via its `animation` style. Motion is short +
+ * eased so the UI feels responsive and never distracts from the world.
+ */
+const OVERLAY_KEYFRAMES = `
+@keyframes hudFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hudCardIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(14px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes hudChipIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes hudPopIn {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+`;
+
 export interface DialogueData {
   speaker: string;
   /** Single line (checkpoints). */
@@ -66,6 +88,9 @@ export function DialogueOverlay({
         zIndex: 10,
       }}
     >
+      {/* Keyframes for the premium entrance animations (inline styles can't
+          declare @keyframes, so they live in one injected stylesheet). */}
+      <style>{OVERLAY_KEYFRAMES}</style>
       {!ready && (
         <div
           style={{
@@ -133,6 +158,7 @@ export function DialogueOverlay({
             WebkitBackdropFilter: theme.blurSoft,
             backdropFilter: theme.blurSoft,
             pointerEvents: "auto",
+            animation: "hudFadeIn 240ms ease-out both",
           }}
         >
           <div
@@ -145,6 +171,7 @@ export function DialogueOverlay({
               backdropFilter: theme.blur,
               border: `1px solid ${theme.accentBorder}`,
               boxShadow: theme.shadow,
+              animation: "hudPopIn 320ms cubic-bezier(0.22,1,0.36,1) both",
             }}
           >
             <div
@@ -208,6 +235,7 @@ export function DialogueOverlay({
             fontSize: 14,
             color: theme.text,
             whiteSpace: "nowrap",
+            animation: "hudChipIn 260ms ease-out both",
           }}
         >
           {touch ? (
@@ -238,16 +266,19 @@ export function DialogueOverlay({
         </div>
       )}
 
-      {/* Checkpoint dialogue box (bottom-center) */}
+      {/* Checkpoint dialogue — a COMPACT floating card (bottom-center) that
+          animates in, replacing the old full-width bottom box so the world is
+          never covered. Slim, glassy, with an accent guide-voice label. */}
       {dialogue && (
         <div
+          key={`${dialogue.speaker}|${dialogue.line}`}
           style={{
             position: "absolute",
             left: "50%",
-            bottom: 32,
+            bottom: 28,
             transform: "translateX(-50%)",
-            width: "min(680px, calc(100vw - 48px))",
-            padding: "16px 22px",
+            width: "min(440px, calc(100vw - 32px))",
+            padding: "13px 18px",
             borderRadius: theme.radius,
             background: theme.glassStrong,
             WebkitBackdropFilter: theme.blur,
@@ -255,27 +286,39 @@ export function DialogueOverlay({
             border: `1px solid ${theme.border}`,
             boxShadow: theme.shadow,
             pointerEvents: "auto",
+            animation: "hudCardIn 300ms cubic-bezier(0.22,1,0.36,1) both",
           }}
         >
           <div
             style={{
-              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12,
               textTransform: "uppercase",
-              letterSpacing: 1,
+              letterSpacing: 1.2,
               color: theme.accent,
               marginBottom: 6,
             }}
           >
+            <span aria-hidden style={{ fontSize: 11, opacity: 0.9 }}>
+              ◈
+            </span>
             {dialogue.speaker}
           </div>
           {dialogue.lines && dialogue.lines.length > 0 ? (
             dialogue.lines.map((l, i) => (
-              <div key={i} style={{ fontSize: 16, lineHeight: 1.5 }}>
+              <div
+                key={i}
+                style={{ fontSize: 14.5, lineHeight: 1.5, color: theme.textDim }}
+              >
                 {l}
               </div>
             ))
           ) : (
-            <div style={{ fontSize: 16, lineHeight: 1.5 }}>{dialogue.line}</div>
+            <div style={{ fontSize: 14.5, lineHeight: 1.5, color: theme.textDim }}>
+              {dialogue.line}
+            </div>
           )}
         </div>
       )}
