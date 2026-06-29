@@ -122,7 +122,6 @@ export function EngineMount() {
       <Nameplate
         position={nameplate}
         name={profile.name}
-        title={profile.title}
         hidden={!ready || welcome !== null || panelId !== null}
       />
       {showWalkControl && <WalkControl onDrive={handleDrive} />}
