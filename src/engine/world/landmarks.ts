@@ -15,23 +15,32 @@
  */
 
 /**
- * Path control points (XZ) defining the gently winding journey ribbon.
+ * Path control points (XZ) defining the deliberately winding journey ribbon.
  *
- * Pass 2 extended the ribbon (was ~110u long, now ~215u) so the five
- * along-path chapters are well spaced and the player keeps discovering a
- * structure / signpost as they walk, without sprawling into an open world. The
- * ground plane + sky centre (LAYOUT.ground / LAYOUT.atmosphere) were widened to
+ * Pass-2 Stage-1 strengthened the early S-bends so the world reveals in
+ * chapters as the player walks (it never shows everything at once): the strong
+ * first bend (left) tucks the Workshop to its inside so the Workshop is hidden
+ * from spawn until the road rounds the bend, and the strong bend past the
+ * bridge keeps the Library hidden beyond the river until the crossing is made.
+ * Large terrain ridges ({@link ./terrain}) and dense occluder treelines
+ * ({@link ./nature}) sit on the sightlines to reinforce each reveal.
+ *
+ * The ribbon runs ~215u from the spawn clearing to the lighthouse end; the
+ * ground plane + sky centre (LAYOUT.ground / LAYOUT.atmosphere) are sized to
  * match so nothing floats off the meadow. On-rails movement auto-adapts to the
- * new path length.
+ * path length, and the five along-path chapters + the bridge ride the spline,
+ * so their on-the-ground positions follow the bends WITHOUT changing each
+ * chapter's authored `t`/`offset` (Stage 2 owns building scale + staging).
  */
 export const PATH_CONTROL_POINTS: ReadonlyArray<readonly [number, number]> = [
   [0, -8], // pre-spawn lead-in (clamped endpoint shaping)
   [0, 0], // spawn clearing centre
-  [-9, 20], // first bend (hides the workshop until you round it)
-  [8, 42], // approach to the river crossing / bridge
-  [-6, 64], // bend past the bridge toward the library
-  [11, 88], // climb toward the AI laboratory
-  [-10, 112], // bend toward the observatory rise
+  [-12, 18], // STRONG first bend left — tucks the workshop to the inside so it
+  //           stays hidden until the road rounds the bend
+  [9, 41], // swing decisively right to the river crossing / bridge
+  [-8, 64], // strong bend left past the bridge — hides the library beyond it
+  [11, 88], // climb right toward the AI laboratory
+  [-10, 112], // bend left toward the observatory rise
   [6, 136], // observatory shoulder
   [-4, 160], // final bend
   [0, 184], // far end near the lighthouse + water
@@ -96,8 +105,9 @@ export interface LandmarkSpec {
    * Radius (world units) of the KEEP-CLEAR apron around the structure anchor.
    * Scatter/foliage/waypoint systems skip any placement falling inside this
    * radius so the building reads with a clean ground apron and nothing
-   * intersects or crowds it. Sized to the structure's footprint + its own props
-   * (e.g. the workshop tent, the library's great tree) plus a small margin.
+   * intersects or crowds it. STAGE 2 widened these so the bigger buildings PLUS
+   * their full courtyard staging (paved court + fence ring + props + corner
+   * landscaping) stay clear of scatter/hills/road.
    */
   clearRadius: number;
 }
@@ -115,11 +125,11 @@ export interface LandmarkSpec {
  * the path length are the tunables to dial the discovery cadence.
  */
 export const LANDMARKS: readonly LandmarkSpec[] = [
-  { id: "workshop", t: 0.21, offset: 9, radius: 7, marker: "firepit", clearRadius: 9.5 },
-  { id: "library", t: 0.42, offset: -9, radius: 7, marker: "lantern", clearRadius: 10 },
-  { id: "ai-laboratory", t: 0.57, offset: 9, radius: 7, marker: "lantern", clearRadius: 9 },
-  { id: "observatory", t: 0.72, offset: -10, radius: 7, marker: "lantern", clearRadius: 9 },
-  { id: "lighthouse", t: 0.92, offset: 8, radius: 7.5, marker: "firepit", clearRadius: 9 },
+  { id: "workshop", t: 0.21, offset: 14, radius: 7, marker: "firepit", clearRadius: 14 },
+  { id: "library", t: 0.42, offset: -14, radius: 7, marker: "lantern", clearRadius: 14.5 },
+  { id: "ai-laboratory", t: 0.57, offset: 14, radius: 7, marker: "lantern", clearRadius: 14.5 },
+  { id: "observatory", t: 0.72, offset: -14, radius: 7, marker: "lantern", clearRadius: 13.5 },
+  { id: "lighthouse", t: 0.92, offset: 13, radius: 7.5, marker: "firepit", clearRadius: 13.5 },
 ];
 
 /**
@@ -130,13 +140,13 @@ export const LANDMARKS: readonly LandmarkSpec[] = [
 /** Path parameter at the heart of the spawn clearing (campfire + cabin anchor). */
 export const SPAWN_CLEARING_T = 0.05;
 /** Campfire offset from the clearing centre (camp heart). */
-export const SPAWN_FIRE_OFFSET = { x: -3.2, z: 1.5 } as const;
+export const SPAWN_FIRE_OFFSET = { x: -3.6, z: 1.5 } as const;
 /** Lateral offset (right of travel) of the arrival cabin from the clearing. */
-export const ARRIVAL_CABIN_OFFSET = 7.5;
-/** Keep-clear apron radius around the arrival cabin. */
-export const ARRIVAL_CABIN_CLEAR_RADIUS = 8;
+export const ARRIVAL_CABIN_OFFSET = 9.5;
+/** Keep-clear apron radius around the arrival cabin (sized to the bigger hut + its camp dressing). */
+export const ARRIVAL_CABIN_CLEAR_RADIUS = 11;
 /** Keep-clear apron radius around the campfire/camp heart. */
-export const SPAWN_CAMP_CLEAR_RADIUS = 7.5;
+export const SPAWN_CAMP_CLEAR_RADIUS = 8.5;
 
 /**
  * A circular ground exclusion zone around a structure anchor. Scatter and
@@ -209,6 +219,88 @@ export function computeKeepClearZones(path: PathLike): KeepClearZone[] {
   });
 
   return zones;
+}
+
+/**
+ * How far IN FRONT of a building anchor (toward the road, along the building's
+ * depth axis) its "front door" sits. Used to terminate the entrance plaza at
+ * the doorway and exposed for Stage 2 (building scale + staging). Tunable.
+ */
+export const ENTRANCE_FRONT_INSET = 6.5;
+
+/**
+ * Resolved per-building ENTRANCE layout, derived from the path + each landmark's
+ * `t`/`offset`. This is the single source of truth Stage 2 (building scale +
+ * staging) and the handcrafted-road plaza builder ({@link ./road}) consume so
+ * the road court, the building, and any future staging all agree on WHERE each
+ * location's entrance is and how it is oriented — without re-deriving geometry.
+ */
+export interface EntranceLayout {
+  /** Stable chapter id (matches content + the structure builder). */
+  id: string;
+  /** Path parameter where the building anchor projects onto the road. */
+  t: number;
+  /** Signed lateral offset of the anchor from the road centreline. */
+  offset: number;
+  /** Point on the ROAD centreline the building sits beside (the spur root). */
+  pathX: number;
+  pathZ: number;
+  /** Building anchor (centre) on the XZ plane. */
+  anchorX: number;
+  anchorZ: number;
+  /** Front-door point: `ENTRANCE_FRONT_INSET` in front of the anchor, toward the road. */
+  doorX: number;
+  doorZ: number;
+  /** Unit vector along the path tangent at the anchor (building left-right). */
+  alongX: number;
+  alongZ: number;
+  /** Unit vector from the road toward the anchor (building depth). */
+  intoX: number;
+  intoZ: number;
+  /** Yaw (deg) the building FRONT faces (back toward the road). */
+  faceYaw: number;
+}
+
+/**
+ * Compute the resolved {@link EntranceLayout} for every along-path chapter PLUS
+ * the arrival camp, from the SAME path samples + offsets the structures are
+ * built from. Ordered camp-first then by increasing distance along the path.
+ */
+export function computeEntrances(path: PathLike): EntranceLayout[] {
+  const RAD_TO_DEG = 180 / Math.PI;
+  const make = (id: string, t: number, offset: number): EntranceLayout => {
+    const s = path.sample(t);
+    const rightX = s.tangent.z;
+    const rightZ = -s.tangent.x;
+    const sign = offset >= 0 ? 1 : -1;
+    const intoX = rightX * sign;
+    const intoZ = rightZ * sign;
+    const offsetAbs = Math.abs(offset);
+    const anchorX = s.position.x + intoX * offsetAbs;
+    const anchorZ = s.position.z + intoZ * offsetAbs;
+    return {
+      id,
+      t,
+      offset,
+      pathX: s.position.x,
+      pathZ: s.position.z,
+      anchorX,
+      anchorZ,
+      doorX: anchorX - intoX * ENTRANCE_FRONT_INSET,
+      doorZ: anchorZ - intoZ * ENTRANCE_FRONT_INSET,
+      alongX: s.tangent.x,
+      alongZ: s.tangent.z,
+      intoX,
+      intoZ,
+      faceYaw: Math.atan2(-intoX, -intoZ) * RAD_TO_DEG,
+    };
+  };
+
+  const out: EntranceLayout[] = [
+    make("arrival-camp", SPAWN_CLEARING_T, ARRIVAL_CABIN_OFFSET),
+  ];
+  for (const lm of LANDMARKS) out.push(make(lm.id, lm.t, lm.offset));
+  return out;
 }
 
 /**
