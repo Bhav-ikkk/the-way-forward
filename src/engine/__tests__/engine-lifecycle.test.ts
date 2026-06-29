@@ -44,11 +44,20 @@ vi.mock("playcanvas", () => {
     addComponent(type?: unknown) {
       // Assign the component to `this[type]` like the real engine does, and
       // give the camera component the screen-projection method the new
-      // InteractionController uses for the floating nameplate.
-      const comp =
-        type === "camera"
-          ? { worldToScreen: (_w: unknown, s?: Vec3) => s ?? new Vec3() }
-          : {};
+      // InteractionController uses for the floating nameplate. The `anim`
+      // component gets the minimal state-machine surface the character anim
+      // wiring + controller touch (loadStateGraph/assignAnimation/setFloat).
+      let comp: Record<string, unknown> = {};
+      if (type === "camera") {
+        comp = { worldToScreen: (_w: unknown, s?: Vec3) => s ?? new Vec3() };
+      } else if (type === "anim") {
+        comp = {
+          loadStateGraph: () => {},
+          assignAnimation: () => {},
+          setFloat: () => {},
+          activate: true,
+        };
+      }
       if (typeof type === "string") {
         (this as Record<string, unknown>)[type] = comp;
       }
@@ -217,6 +226,13 @@ vi.mock("playcanvas", () => {
     EVENT_MOUSEMOVE: "mousemove",
     EVENT_MOUSEWHEEL: "mousewheel",
     MOUSEBUTTON_LEFT: 0,
+    // Anim state-graph constants referenced when building the locomotion graph
+    // (only read inside the async character-ready callback, which never fires
+    // in these tests — provided for robustness so any eval-time reference is
+    // well-defined).
+    ANIM_GREATER_THAN: "GREATER_THAN",
+    ANIM_LESS_THAN: "LESS_THAN",
+    ANIM_PARAMETER_FLOAT: "FLOAT",
   };
 });
 
