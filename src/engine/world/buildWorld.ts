@@ -3,7 +3,13 @@ import * as pc from "playcanvas";
 import chapters from "../../../content/chapters.json";
 import dialogues from "../../../content/dialogues.json";
 import { createPath, type Path } from "./path";
-import { LANDMARKS, PATH_CONTROL_POINTS, SPAWN_T } from "./landmarks";
+import {
+  computeEntrances,
+  type EntranceLayout,
+  LANDMARKS,
+  PATH_CONTROL_POINTS,
+  SPAWN_T,
+} from "./landmarks";
 import { buildLighting } from "./lighting";
 import { buildAtmosphere } from "./atmosphere";
 import { buildTerrain } from "./terrain";
@@ -14,6 +20,8 @@ import { buildNature } from "./nature";
 import { type Marker, placeLandmark, stepMarkers } from "./checkpoint";
 import { buildWaypoints } from "./waypoints";
 import { buildNpc } from "./npc";
+import { setupCharacterAnimation } from "./characterAnim";
+import { CHARACTER } from "./character.config";
 import { LAYOUT, loadModel } from "./shared";
 import type {
   Checkpoint,
@@ -52,6 +60,14 @@ export interface World {
   spawnYaw: number;
   /** The journey path spline the player rides along (on-rails movement). */
   path: Path;
+  /**
+   * Resolved per-building ENTRANCE layout (the five chapters + the arrival
+   * camp): road-spur root, building anchor, front-door point, frame axes, and
+   * facing. Exposed so Stage 2 (building scale + staging) can re-stage each
+   * location WITHOUT re-deriving geometry, and so the road plaza + buildings
+   * stay in agreement on where each entrance is.
+   */
+  entrances: EntranceLayout[];
   /** Starting distance `s` (world units) along the path for the spawn point. */
   spawnDistance: number;
   /** Register a callback fired once the character entity is in the scene. */
@@ -66,9 +82,10 @@ export interface World {
  * cohesive world systems that each build one concern:
  *
  * - {@link buildLighting} — sun + ambient.
- * - {@link buildTerrain}  — flat corridor ground + gentle framing hills.
+ * - {@link buildTerrain}  — flat corridor ground + sculpted framing ridges.
  * - {@link buildRiver}    — river strip + bridge + bridge-deck collider.
- * - {@link buildRoad}     — path strip + lanterns + confinement-wall colliders.
+ * - {@link buildRoad}     — handcrafted dirt road + entrance plazas + lanterns
+ *   + confinement-wall colliders.
  * - {@link buildSpawn}    — cozy spawn camp + campfire light.
  * - {@link buildNpc}      — greeter NPC + welcome checkpoint (copy from content).
  * - {@link buildNature}   — scattered trees/rocks (each with a prop collider).
@@ -191,6 +208,15 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
         LAYOUT.character.scale,
         LAYOUT.character.scale,
       );
+      // Wire the locomotion anim state machine (idle/run) onto the player ONLY
+      // when the configured model is actually animated. The small static
+      // `character.glb` (CHARACTER.animated === false) skips this entirely and
+      // simply rides the procedural on-rails spline movement, so the parked
+      // `player_*.glb` clips are never fetched. Fully guarded either way — a
+      // missing anim component/clip still leaves the player rendering + moving.
+      if (CHARACTER.animated) {
+        setupCharacterAnimation(app, root);
+      }
       character = root;
       for (const cb of characterReadyCbs) cb(root);
       fireReady();
@@ -215,6 +241,7 @@ export function buildWorld(app: pc.AppBase, options: BuildWorldOptions): World {
     colliders,
     spawnYaw: camp.spawnYaw,
     path,
+    entrances: computeEntrances(path),
     spawnDistance: path.distanceForT(SPAWN_T),
     onCharacterReady: (cb) => {
       if (character) cb(character);
