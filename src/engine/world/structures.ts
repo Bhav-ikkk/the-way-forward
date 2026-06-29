@@ -9,8 +9,174 @@ import {
   makeMaterial,
   type Marker,
   type Placement,
+  yawFromDir,
 } from "./shared";
 import type { ColliderSpec } from "./types";
+
+/**
+ * Structures system: the handcrafted, per-chapter environmental BUILDINGS the
+ * player arrives at.
+ *
+ * Owner-feedback pass: each chapter is now a SINGLE, COMPLETE building model
+ * from the curated catalogue (a finished GLB), dropped FLAT on a clean
+ * foundation apron and oriented to face the road. STAGE 2 then makes each
+ * building DOMINANT (roughly doubled in size) and stages it as a real
+ * DESTINATION: a wide paved COURTYARD in front of the entrance, chapter-
+ * appropriate props arranged around the court edges, a low fence ring with an
+ * open entrance gate, landscaping framing the corners, and lit corner lamps —
+ * all composed in the building's frame so the central entrance walkway (paved
+ * by the road plaza in {@link ./road}) stays clear.
+ *
+ * Every structure:
+ *  - sits at y≈0 on a subtle flat foundation pad (sized from the building's
+ *    footprint) so nothing floats or sinks, with the courtyard pad extending it
+ *    in front of the door;
+ *  - is oriented so its front faces back toward the path (see
+ *    {@link StructureFrame.faceYaw}), with a per-building `yawOffset` tunable
+ *    for models whose authored "front" isn't +Z;
+ *  - keeps a warm (or, for the AI lab, cool) accent light registered as a
+ *    flickering {@link Marker} — the building, not the light, is the landmark;
+ *  - emits one box footprint collider so the player can't walk through it.
+ *
+ * The keep-clear apron radius per chapter ({@link ./landmarks LandmarkSpec.clearRadius})
+ * excludes all scatter/foliage/rocks/ruins from the building footprint so the
+ * foundation stays clean.
+ */
+
+// ---- Tunable building constants ------------------------------------------
+
+/**
+ * Per-chapter COMPLETE building model + how it reads in the world. All values
+ * are tunable: `scale` sizes the model against the small ~1.7u character;
+ * `yawOffset` (deg) rotates a model whose authored front isn't +Z so its
+ * entrance faces the road; `halfAlong`/`halfInto` size the footprint collider +
+ * foundation pad; `height` sizes the collider's vertical extent.
+ */
+interface BuildingDef {
+  /** Complete building GLB (single, finished model — no kit assembly). */
+  url: string;
+  /** Uniform scale applied to the model (tunable against the ~1.7u character). */
+  scale: number;
+  /** Extra yaw (deg) so the model's entrance faces the road. Tunable. */
+  yawOffset: number;
+  /** Footprint half-size along the path tangent (left-right). */
+  halfAlong: number;
+  /** Footprint half-size along the depth axis (into the scene). */
+  halfInto: number;
+  /** Approx building height (world units) for the collider's vertical extent. */
+  height: number;
+}
+
+/**
+ * The chosen complete-building model + scale per chapter. These are the
+ * owner-recommended catalogue models; the scales are deliberately exposed here
+ * as the single place to tune how big each building reads.
+ *
+ * STAGE 2 roughly DOUBLED every building so it DOMINATES its surroundings and
+ * reads as a real destination towering over the ~1.7u character: the workshop
+ * /library/AI-lab are now substantial halls, and the observatory/lighthouse are
+ * genuinely tall towers. The `halfAlong`/`halfInto`/`height` were refit to the
+ * new visual size so the foundation pad, the footprint collider, and the accent
+ * -light heights (all derived from these) stay glued to the model — nothing
+ * floats, sinks, or clips.
+ */
+const BUILDINGS = {
+  workshop: {
+    url: "/models/bld_c.glb",
+    scale: 3.0,
+    yawOffset: 0,
+    halfAlong: 5.0,
+    halfInto: 4.4,
+    height: 7.6,
+  },
+  library: {
+    url: "/models/bld_e.glb",
+    scale: 3.0,
+    yawOffset: 0,
+    halfAlong: 5.2,
+    halfInto: 4.8,
+    height: 8.4,
+  },
+  "ai-laboratory": {
+    url: "/models/bld_l.glb",
+    scale: 3.0,
+    yawOffset: 0,
+    halfAlong: 5.4,
+    halfInto: 4.8,
+    height: 7.6,
+  },
+  observatory: {
+    url: "/models/bld_tower_a.glb",
+    scale: 3.3,
+    yawOffset: 0,
+    halfAlong: 4.2,
+    halfInto: 4.2,
+    height: 15.0,
+  },
+  lighthouse: {
+    url: "/models/bld_tower_b.glb",
+    scale: 3.7,
+    yawOffset: 0,
+    halfAlong: 4.0,
+    halfInto: 4.0,
+    height: 19.0,
+  },
+} as const satisfies Record<string, BuildingDef>;
+
+/** The Arrival Camp's main shelter model + how it reads (cozy wooden hut). */
+const ARRIVAL_HUT: BuildingDef = {
+  url: "/models/camp_hut.glb",
+  scale: 3.6,
+  yawOffset: 0,
+  halfAlong: 4.2,
+  halfInto: 4.0,
+  height: 4.6,
+};
+
+/** Lateral/depth margin (world units) the foundation pad extends past the footprint. */
+const PAD_MARGIN = 1.4;
+/** Foundation pad thickness (a subtle flat apron, just above the ground). */
+const PAD_THICKNESS = 0.06;
+/** Foundation pad top height above y=0. */
+const PAD_Y = 0.03;
+/** Clean packed-earth / stone foundation colour. */
+const FOUNDATION_COLOR = [0.5, 0.47, 0.42] as const;
+
+// ---- Courtyard staging constants (Stage 2) -------------------------------
+//
+// Every chapter building now sits at the head of a designed COURTYARD: a wide
+// flat paved gathering court in FRONT of the entrance (composed in the
+// building's frame, along the tangent × toward the road), ringed by a low fence
+// with a GAP/gate at the entrance, lit at its front corners, and framed with a
+// little landscaping just outside its corners. All values are tunable here.
+
+/** Courtyard depth (world units) extending from the building's front face toward the road. */
+const COURT_DEPTH = 5.4;
+/** Courtyard half-width added to the building's half-along (so the court is WIDER than the building). */
+const COURT_ALONG_MARGIN = 2.2;
+/** Courtyard pad top height (above the foundation pad, just below the road plaza at 0.05). */
+const COURT_Y = 0.045;
+/** Courtyard pad thickness. */
+const COURT_THICKNESS = 0.05;
+/** Lightly-paved court colour (a touch lighter than the building foundation). */
+const COURT_COLOR = [0.56, 0.53, 0.47] as const;
+/** Clear half-width of the entrance walkway at the court's front edge — NO fence/props here. */
+const ENTRANCE_GAP_HALF = 2.6;
+/** Approx frame-local spacing between fence panels (and their colliders) along an edge. */
+const FENCE_PANEL = 1.8;
+/** Uniform scale applied to each courtyard fence panel/gate model. */
+const FENCE_SCALE = 1.5;
+/** Fence collider half-thickness (across the rail) and half-height. */
+const FENCE_COLLIDER_T = 0.16;
+const FENCE_COLLIDER_H = 0.6;
+/** Courtyard fence model + the gate posts flanking the entrance gap. */
+const FENCE_MODEL = "/models/fence_wood.glb";
+const GATE_MODEL = "/models/fence_gate.glb";
+/** Courtyard corner lamp post + its lit accent height. */
+const COURT_LAMP_MODEL = "/models/lamp_post.glb";
+const COURT_LAMP_Y = 2.6;
+
+// ---- Highlight ------------------------------------------------------------
 
 /**
  * A handle to a chapter structure's SUBTLE interaction highlight.
@@ -18,8 +184,7 @@ import type { ColliderSpec } from "./types";
  * `setHighlight(factor)` ramps the building's accent light + a soft ground glow
  * ring between idle (`0`) and fully highlighted (`1`). The
  * {@link ../InteractionController} eases this factor so the highlight fades in
- * as the player approaches and out as they leave — tasteful, not a hard
- * outline.
+ * as the player approaches and out as they leave.
  */
 export interface StructureHandle {
   /** Stable chapter id (matches the landmark / chapter content). */
@@ -38,8 +203,7 @@ const RING_RADIUS = 5.4;
 /**
  * Build the subtle highlight for a freshly-composed structure: a soft emissive
  * ground glow disc at its anchor plus an accent-light boost. The markers it
- * affects are exactly those appended to `markers` since `startMarkerIndex`
- * (i.e. this structure's own accent lights). Returns a {@link StructureHandle}.
+ * affects are exactly those appended to `markers` since `startMarkerIndex`.
  */
 function makeHighlight(
   app: pc.AppBase,
@@ -68,11 +232,9 @@ function makeHighlight(
     const ff = factor < 0 ? 0 : factor > 1 ? 1 : factor;
     if (Math.abs(ff - last) < 0.002) return;
     last = ff;
-    // Boost (and let stepMarkers keep flickering around) the accent lights.
     for (let i = 0; i < mine.length; i++) {
       mine[i].baseIntensity = baseIntensity[i] * (1 + HILITE_LIGHT_BOOST * ff);
     }
-    // Fade + gently swell the ground glow ring.
     const on = ff > 0.02;
     ring.enabled = on;
     if (on) {
@@ -86,34 +248,7 @@ function makeHighlight(
   return { id, setHighlight };
 }
 
-/**
- * Structures system: the handcrafted, per-chapter environmental BUILDINGS the
- * player arrives at. This pass replaces the old "floating lantern / firepit"
- * markers with real architecture assembled from the building kit
- * (build_wall*, build_roof, build_floor, build_column, build_cylinder,
- * build_hexagon, build_cube, build_door) plus chapter-appropriate props, so
- * each checkpoint reads as a PLACE rather than a glowing dot.
- *
- * Every structure:
- *  - is composed in a local FRAME ({@link StructureFrame}) whose `along` axis
- *    follows the path tangent (the building's left-right) and whose `into` axis
- *    points from the path toward the anchor (its depth), with the FRONT facing
- *    back toward the road so doorways/silhouettes read as you arrive;
- *  - keeps a warm (or, for the AI lab, cool) accent light registered as a
- *    flickering {@link Marker} — the building, not the light, is the landmark;
- *  - emits a small number of simple box colliders for its footprint/tower so
- *    the player can't walk through it, consistent with the physics world.
- *
- * Kit pieces are ~1-unit Kenney models; the scale constants below push them up
- * to read against the ~3.0u-tall player. All scales/footprints are tunable.
- */
-
-// ---- Tunable kit constants -----------------------------------------------
-
-/** World height/width of one wall piece (Kenney ~1u kit, scaled up). */
-const WALL_SCALE = 2.6;
-/** A lower wall scale for the glass-walled AI lab (a low, modern building). */
-const LOW_WALL_SCALE = 2.0;
+// ---- Frame + placement helpers -------------------------------------------
 
 /**
  * A structure's local placement frame. Built by `placeLandmark`; consumed by
@@ -148,9 +283,8 @@ function toWorld(
 }
 
 /**
- * Small per-URL placement collector so each kit piece GLB is fetched ONCE and
- * instanced at all its transforms (performance-friendly for the repeated walls
- * / columns / floor tiles a building needs).
+ * Per-URL placement collector so each prop GLB is fetched ONCE and instanced at
+ * all its frame-local transforms.
  */
 class KitBatch {
   private readonly map = new Map<string, Placement[]>();
@@ -242,105 +376,238 @@ function accent(
 }
 
 /**
- * Assemble a rectangular building from wall pieces: front + back walls run
- * along the `along` axis, side walls along `into`, with corner posts. The front
- * can carry a door (or be left open), and the sides can carry windows. Optional
- * roof + floor. Pieces are batched per URL via {@link KitBatch}.
+ * Lay a clean, subtle flat foundation apron under a building and place the
+ * complete building model FLAT on it at y≈0, facing the road. Returns nothing;
+ * callers add their own props + accent light + collider around it.
  */
-interface RectOptions {
-  halfAlong: number;
-  halfInto: number;
-  wallScale: number;
-  /** How the front (path-facing) wall reads. */
-  front: "door" | "open" | "wall";
-  /** Use windowed wall pieces on the two sides. */
-  windowSides?: boolean;
-  /** Lay a roof across the top. */
-  roof?: boolean;
-  /** Lay floor tiles at the base. */
-  floor?: boolean;
+function placeBuilding(
+  app: pc.AppBase,
+  f: StructureFrame,
+  def: BuildingDef,
+): void {
+  // Clean flat foundation pad (slightly larger than the footprint), oriented
+  // to the building so it reads as a deliberate apron rather than scatter.
+  addPrimitive(
+    app,
+    "box",
+    makeMaterial(FOUNDATION_COLOR),
+    [f.ox, PAD_Y, f.oz],
+    [(def.halfAlong + PAD_MARGIN) * 2, PAD_THICKNESS, (def.halfInto + PAD_MARGIN) * 2],
+    f.faceYaw,
+  );
+
+  // The complete building, flat on the pad, entrance facing the road.
+  loadModelInstances(app, def.url, [
+    {
+      position: [f.ox, 0, f.oz],
+      yaw: f.faceYaw + def.yawOffset,
+      scale: def.scale,
+    },
+  ]);
 }
 
-function buildRect(
-  app: pc.AppBase,
-  batch: KitBatch,
+// ---- Courtyard staging (Stage 2) -----------------------------------------
+
+/**
+ * A chapter prop placed on/around the courtyard, expressed in the building's
+ * frame (`along` = path tangent, `into` = depth; NEGATIVE into = toward the
+ * road / in front of the building). Optionally carries a solid `collider`.
+ */
+interface StageProp {
+  url: string;
+  along: number;
+  into: number;
+  y?: number;
+  /** Extra yaw (deg) on top of the building's faceYaw. */
+  yaw?: number;
+  scale: number | [number, number, number];
+  /** Solid prop collider half-extents [hx, hy, hz]; omit for decorative props. */
+  collider?: [number, number, number];
+}
+
+/** Decorative landscaping (tree/shrub) placed just OUTSIDE the courtyard. */
+interface StagePlant {
+  url: string;
+  along: number;
+  into: number;
+  scale: number;
+}
+
+/** The composed staging for one chapter building. */
+interface StageKit {
+  /** Chapter-appropriate props arranged around the court edges. */
+  props: StageProp[];
+  /** Landscaping framing the building corners (just outside the court). */
+  plants: StagePlant[];
+  /** Cool (vs warm) courtyard corner lights — used by the AI laboratory. */
+  coolLights?: boolean;
+}
+
+/**
+ * Lay a run of low courtyard fence panels between two frame-local points,
+ * orienting each panel to the edge and emitting a `"prop"` collider per panel
+ * so the perimeter is solid in the physics world.
+ */
+function layFenceRun(
   f: StructureFrame,
-  o: RectOptions,
+  a0: number,
+  i0: number,
+  a1: number,
+  i1: number,
+  out: Placement[],
+  colliders: ColliderSpec[],
+  idBase: string,
+  startIdx: number,
+): number {
+  const dA = a1 - a0;
+  const dI = i1 - i0;
+  const len = Math.hypot(dA, dI);
+  if (len < 1e-3) return startIdx;
+  const n = Math.max(1, Math.round(len / FENCE_PANEL));
+  const step = len / n;
+  const ua = dA / len;
+  const ui = dI / len;
+  // World-space direction of this edge → panel yaw (panel length lies on +Z).
+  const dirX = f.alongX * ua + f.intoX * ui;
+  const dirZ = f.alongZ * ua + f.intoZ * ui;
+  const yaw = yawFromDir(dirX, dirZ);
+  let idx = startIdx;
+  for (let k = 0; k < n; k++) {
+    const a = a0 + ua * step * (k + 0.5);
+    const i = i0 + ui * step * (k + 0.5);
+    const w = toWorld(f, a, i);
+    out.push({ position: [w.x, 0, w.z], yaw, scale: FENCE_SCALE });
+    colliders.push({
+      id: `${idBase}-fence-${idx++}`,
+      type: "box",
+      position: [w.x, FENCE_COLLIDER_H, w.z],
+      halfExtents: [FENCE_COLLIDER_T, FENCE_COLLIDER_H, step / 2],
+      rotation: [0, yaw, 0],
+      role: "prop",
+    });
+  }
+  return idx;
+}
+
+/**
+ * Ring the courtyard with a low fence: both side edges (from the building's
+ * front face out to the court's front edge) plus the front edge in two runs
+ * leaving a clear ENTRANCE GAP in the middle, with an open `fence_gate` set in
+ * that gap. The gate carries NO collider so the on-rails walkway passes
+ * straight through it.
+ */
+function buildCourtFence(
+  app: pc.AppBase,
+  f: StructureFrame,
+  colliders: ColliderSpec[],
+  id: string,
+  halfAlong: number,
+  backInto: number,
+  frontInto: number,
 ): void {
-  const w = o.wallScale;
-  const nAlong = Math.max(2, Math.round((o.halfAlong * 2) / w));
-  const nInto = Math.max(2, Math.round((o.halfInto * 2) / w));
-  const wallY = 0;
+  const fence: Placement[] = [];
+  let idx = 0;
+  // Side edges (building front face → court front edge).
+  idx = layFenceRun(f, -halfAlong, backInto, -halfAlong, frontInto, fence, colliders, id, idx);
+  idx = layFenceRun(f, halfAlong, backInto, halfAlong, frontInto, fence, colliders, id, idx);
+  // Front edge in two runs, leaving the entrance gap open in the centre.
+  idx = layFenceRun(f, -halfAlong, frontInto, -ENTRANCE_GAP_HALF, frontInto, fence, colliders, id, idx);
+  layFenceRun(f, ENTRANCE_GAP_HALF, frontInto, halfAlong, frontInto, fence, colliders, id, idx);
+  loadModelInstances(app, FENCE_MODEL, fence);
 
-  // Front (into = -halfInto) + back (into = +halfInto) walls, running along.
-  const frontCentre = Math.floor(nAlong / 2);
-  for (let i = 0; i < nAlong; i++) {
-    const along = -o.halfAlong + w * (i + 0.5);
-    // Back wall (faces away from the path).
-    batch.add(f, "/models/build_wall.glb", along, o.halfInto, wallY, 180, w);
-    // Front wall.
-    if (o.front === "open") continue;
-    if (o.front === "door" && i === frontCentre) {
-      batch.add(f, "/models/build_wall_door.glb", along, -o.halfInto, wallY, 0, w);
-    } else {
-      const url = o.windowSides
-        ? "/models/build_wall_window.glb"
-        : "/models/build_wall.glb";
-      batch.add(f, url, along, -o.halfInto, wallY, 0, w);
-    }
+  // Open gate centred in the entrance gap, oriented ACROSS the walkway.
+  const gw = toWorld(f, 0, frontInto);
+  loadModelInstances(app, GATE_MODEL, [
+    {
+      position: [gw.x, 0, gw.z],
+      yaw: yawFromDir(f.alongX, f.alongZ),
+      scale: FENCE_SCALE,
+    },
+  ]);
+}
+
+/**
+ * Compose the full COURTYARD staging in front of a building: a wide paved court
+ * pad, the chapter props arranged around its edges (each solid prop emitting a
+ * collider), landscaping framing the corners just outside it, a low fence ring
+ * with an open entrance gate, and two lit corner lamp posts (registered as
+ * flickering markers). Everything is laid in the building's frame so it sits on
+ * the flat apron and the central entrance walkway stays clear.
+ */
+function stageCourtyard(
+  app: pc.AppBase,
+  f: StructureFrame,
+  def: BuildingDef,
+  colliders: ColliderSpec[],
+  markers: Marker[],
+  id: string,
+  kit: StageKit,
+): void {
+  const halfAlong = def.halfAlong + COURT_ALONG_MARGIN;
+  const backInto = -def.halfInto; // building front face
+  const frontInto = -(def.halfInto + COURT_DEPTH); // court front edge (toward road)
+
+  // 1) Paved courtyard pad in FRONT of the building entrance.
+  const cInto = -(def.halfInto + COURT_DEPTH / 2);
+  const cw = toWorld(f, 0, cInto);
+  addPrimitive(
+    app,
+    "box",
+    makeMaterial(COURT_COLOR),
+    [cw.x, COURT_Y, cw.z],
+    [halfAlong * 2, COURT_THICKNESS, COURT_DEPTH],
+    f.faceYaw,
+  );
+
+  // 2) Chapter props + landscaping + corner lamp posts (one batch per URL).
+  const batch = new KitBatch();
+  for (const p of kit.props) {
+    batch.add(f, p.url, p.along, p.into, p.y ?? 0, p.yaw ?? 0, p.scale);
+  }
+  for (const pl of kit.plants) {
+    batch.add(f, pl.url, pl.along, pl.into, 0, 0, pl.scale);
+  }
+  batch.add(f, COURT_LAMP_MODEL, -halfAlong, frontInto, 0, 0, FENCE_SCALE);
+  batch.add(f, COURT_LAMP_MODEL, halfAlong, frontInto, 0, 0, FENCE_SCALE);
+  batch.flush(app);
+
+  // Solid prop colliders (decorative plants/lamps get none).
+  let ci = 0;
+  for (const p of kit.props) {
+    if (!p.collider) continue;
+    const w = toWorld(f, p.along, p.into);
+    colliders.push({
+      id: `${id}-prop-${ci++}`,
+      type: "box",
+      position: [w.x, p.collider[1], w.z],
+      halfExtents: p.collider,
+      rotation: [0, f.faceYaw + (p.yaw ?? 0), 0],
+      role: "prop",
+    });
   }
 
-  // Side walls (along = ±halfAlong), running through the depth.
-  for (let j = 0; j < nInto; j++) {
-    const into = -o.halfInto + w * (j + 0.5);
-    const sideUrl = o.windowSides
-      ? "/models/build_wall_window.glb"
-      : "/models/build_wall.glb";
-    batch.add(f, sideUrl, -o.halfAlong, into, wallY, 90, w);
-    batch.add(f, sideUrl, o.halfAlong, into, wallY, 270, w);
-  }
+  // 3) Low fence ring with an open entrance gate.
+  buildCourtFence(app, f, colliders, id, halfAlong, backInto, frontInto);
 
-  // Corner posts to close the silhouette.
-  for (const sa of [-1, 1] as const) {
-    for (const si of [-1, 1] as const) {
-      batch.add(
-        f,
-        "/models/build_wall_corner.glb",
-        sa * o.halfAlong,
-        si * o.halfInto,
-        wallY,
-        si > 0 ? 180 : 0,
-        w,
-      );
-    }
-  }
-
-  // Floor tiles.
-  if (o.floor) {
-    for (let i = 0; i < nAlong; i++) {
-      for (let j = 0; j < nInto; j++) {
-        const along = -o.halfAlong + w * (i + 0.5);
-        const into = -o.halfInto + w * (j + 0.5);
-        batch.add(f, "/models/build_floor.glb", along, into, 0.04, 0, w);
-      }
-    }
-  }
-
-  // Roof across the top (a couple of overlapping pieces sized to the span).
-  if (o.roof) {
-    const roofY = w * 0.96;
-    const roofScale: [number, number, number] = [o.halfAlong * 2.2, w, o.halfInto * 2.2];
-    batch.add(f, "/models/build_roof.glb", 0, 0, roofY, 0, roofScale);
-  }
+  // 4) Two lit corner lamps at the court's front corners (markers).
+  accent(app, markers, f, -halfAlong, frontInto, COURT_LAMP_Y, "lantern", {
+    cool: kit.coolLights,
+    range: 11,
+  });
+  accent(app, markers, f, halfAlong, frontInto, COURT_LAMP_Y, "lantern", {
+    cool: kit.coolLights,
+    range: 11,
+  });
 }
 
 // ---- Per-chapter structure builders --------------------------------------
 
 /**
- * Arrival Camp cabin — the richest, fully-built shelter. Exported so the spawn
- * camp ({@link ./spawn}) can drop it beside the existing campfire/benches.
- * Walls + doorway + windowed sides + roof + floor, with a warm lantern glow at
- * the door. Emits one footprint collider.
+ * Arrival Camp — a cozy wooden camp: the complete `camp_hut` shelter on a clean
+ * pad, with a canvas tent, a fire pit, and a bedroll arranged AROUND it (never
+ * overlapping), plus a warm lantern glow. Exported so the spawn camp
+ * ({@link ./spawn}) can drop it beside the existing campfire/benches. Emits one
+ * footprint collider.
  */
 export function buildArrivalCabin(
   app: pc.AppBase,
@@ -349,206 +616,275 @@ export function buildArrivalCabin(
   markers: Marker[],
 ): StructureHandle {
   const startMarker = markers.length;
+  const def = ARRIVAL_HUT;
+  placeBuilding(app, f, def);
+
+  const sa = def.halfAlong;
+  const si = def.halfInto;
+
+  // Cozy, lived-in camp dressing arranged on the apron AROUND the hut (clear of
+  // it and clear of the doorway), so the spawn point reads as a real little
+  // settlement the player is happy to start in.
   const batch = new KitBatch();
-  buildRect(app, batch, f, {
-    halfAlong: 3.0,
-    halfInto: 2.6,
-    wallScale: WALL_SCALE,
-    front: "door",
-    windowSides: true,
-    roof: true,
-    floor: true,
-  });
-  // A standalone door prop in the front gap + a lantern beside it.
-  batch.add(f, "/models/build_door.glb", 0, -2.6, 0, 0, WALL_SCALE);
-  batch.add(f, "/models/lamp.glb", 1.8, -3.1, 0, 0, 1.4);
+  // Canvas tents flanking the hut.
+  batch.add(f, "/models/camp_tent.glb", sa + 2.4, 0.6, 0, 20, 2.4);
+  batch.add(f, "/models/camp_tent_canvas.glb", -(sa + 2.4), 1.4, 0, -25, 2.2);
+  // A decorative fire pit + bedrolls just in front of the hut doorway.
+  batch.add(f, "/models/campfire_pit.glb", -1.8, -(si + 1.4), 0, 0, 1.8);
+  batch.add(f, "/models/bedroll.glb", 1.8, -(si + 1.2), 0, 10, 1.7);
+  batch.add(f, "/models/bedroll.glb", 2.8, -(si + 2.0), 0, -15, 1.7);
+  // Stores: a woodpile, barrels, a crate, a chest and a signpost around the edges.
+  batch.add(f, "/models/woodpile.glb", sa + 1.8, -(si + 1.0), 0, 70, 1.6);
+  batch.add(f, "/models/log_pile.glb", sa + 2.0, -(si + 2.6), 0, 70, 1.5);
+  batch.add(f, "/models/barrel.glb", -(sa + 1.6), -(si + 1.0), 0, 0, 1.4);
+  batch.add(f, "/models/barrel_open.glb", -(sa + 2.2), -(si + 0.4), 0, 0, 1.3);
+  batch.add(f, "/models/crate.glb", -(sa + 1.4), -(si + 2.4), 0, 20, 1.4);
+  batch.add(f, "/models/chest.glb", 1.4, si + 1.4, 0, 180, 1.4);
+  batch.add(f, "/models/signpost_s.glb", -(sa + 0.6), -(si + 3.6), 0, 30, 1.7);
   batch.flush(app);
 
-  accent(app, markers, f, 1.8, -3.1, 1.7, "lantern");
-  pushFootprint(colliders, "arrival-camp", f, 3.4, 3.0, WALL_SCALE);
+  // Solid camp props get small prop colliders (decorative tents/bedrolls/sign
+  // do not) so the player can brush them consistently with the physics world.
+  const solids: Array<{ along: number; into: number; half: [number, number, number]; yaw: number }> = [
+    { along: sa + 1.8, into: -(si + 1.0), half: [0.9, 0.5, 0.5], yaw: 70 },
+    { along: sa + 2.0, into: -(si + 2.6), half: [0.9, 0.5, 0.5], yaw: 70 },
+    { along: -(sa + 1.6), into: -(si + 1.0), half: [0.5, 0.7, 0.5], yaw: 0 },
+    { along: -(sa + 1.4), into: -(si + 2.4), half: [0.5, 0.5, 0.5], yaw: 20 },
+  ];
+  for (let i = 0; i < solids.length; i++) {
+    const s = solids[i];
+    const w = toWorld(f, s.along, s.into);
+    colliders.push({
+      id: `arrival-prop-${i}`,
+      type: "box",
+      position: [w.x, s.half[1], w.z],
+      halfExtents: s.half,
+      rotation: [0, f.faceYaw + s.yaw, 0],
+      role: "prop",
+    });
+  }
+
+  // Warm lantern glow at the hut's doorway, sized to the bigger hut.
+  accent(app, markers, f, 2.2, -(si + 0.6), 2.0, "lantern");
+  pushFootprint(colliders, "arrival-camp", f, sa, si, def.height / 2, def.height / 2);
   return makeHighlight(app, "arrival-camp", f, markers, startMarker, false);
 }
 
-/** Workshop — an open-front canvas/timber workshop, industrious + hands-on. */
+/** Workshop — a dominant industrial hall fronted by a working courtyard. */
 function buildWorkshop(
   app: pc.AppBase,
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
 ): void {
-  const batch = new KitBatch();
-  buildRect(app, batch, f, {
-    halfAlong: 3.2,
-    halfInto: 2.6,
-    wallScale: WALL_SCALE,
-    front: "open", // open workshop frontage
-    roof: true,
-    floor: true,
-  });
-  // Working camp tent off to one side.
-  batch.add(f, "/models/tent.glb", 5.0, 0.4, 0, 180, 4);
-  // Workbench (bench) + crates/tools (cubes, logs) + an anvil-ish block.
-  batch.add(f, "/models/bench.glb", -0.4, -1.0, 0, 90, 1.8);
-  batch.add(f, "/models/build_cube.glb", 1.8, 0.6, 0, 15, 1.3); // crate
-  batch.add(f, "/models/build_cube.glb", 2.4, 0.2, 0, 40, 0.9); // crate
-  batch.add(f, "/models/build_cube.glb", -2.0, 1.2, 0.7, 0, [0.9, 0.7, 1.4]); // anvil block
-  batch.add(f, "/models/log.glb", -1.4, 1.8, 0, 70, 1.4);
-  batch.add(f, "/models/log.glb", 0.8, 2.0, 0, 20, 1.3);
-  batch.add(f, "/models/stone_small.glb", 3.0, 1.6, 0, 0, 1.3);
-  batch.flush(app);
+  const def = BUILDINGS.workshop;
+  placeBuilding(app, f, def);
 
-  // Warm forge glow.
-  accent(app, markers, f, -0.4, -1.0, 1.6, "firepit");
-  pushFootprint(colliders, "workshop", f, 3.6, 3.0, WALL_SCALE);
+  const sa = def.halfAlong;
+  const si = def.halfInto;
+  const ca = sa + COURT_ALONG_MARGIN; // court half-along
+  const front = -(si + COURT_DEPTH); // court front edge (toward road)
+
+  // Working props arranged around the court edges (clear of the building + the
+  // central entrance walkway). Left edge = a workbench line; right edge =
+  // timber; the front corners hold crates/barrels/pallets.
+  stageCourtyard(app, f, def, colliders, markers, "workshop", {
+    props: [
+      // Left-edge workbench line (facing into the court).
+      { url: "/models/workbench.glb", along: -(ca - 0.8), into: -(si + 1.2), yaw: 90, scale: 1.7, collider: [1.0, 0.5, 0.5] },
+      { url: "/models/workbench_anvil.glb", along: -(ca - 0.8), into: -(si + 3.4), yaw: 90, scale: 1.6, collider: [1.0, 0.6, 0.5] },
+      { url: "/models/workbench_grind.glb", along: -(ca - 0.8), into: -(si + 4.8), yaw: 90, scale: 1.6, collider: [0.9, 0.6, 0.5] },
+      { url: "/models/tool_hammer.glb", along: -(ca - 1.0), into: -(si + 1.2), y: 1.0, yaw: 40, scale: 1.2 },
+      { url: "/models/tool_axe.glb", along: -(ca - 1.4), into: -(si + 4.8), y: 0.9, yaw: -30, scale: 1.2 },
+      // Right-edge timber stacks.
+      { url: "/models/woodpile.glb", along: ca - 0.8, into: -(si + 1.6), yaw: 90, scale: 1.7, collider: [1.1, 0.5, 0.5] },
+      { url: "/models/log_pile.glb", along: ca - 0.8, into: -(si + 3.4), yaw: 90, scale: 1.6, collider: [1.1, 0.5, 0.5] },
+      { url: "/models/planks_stack.glb", along: ca - 1.0, into: -(si + 4.8), yaw: 90, scale: 1.5, collider: [0.9, 0.4, 0.5] },
+      // Front-corner crates / barrels / pallet (off the central walkway).
+      { url: "/models/crate_large.glb", along: 4.2, into: front + 0.8, yaw: 20, scale: 1.6, collider: [0.7, 0.7, 0.7] },
+      { url: "/models/crate.glb", along: 3.1, into: front + 0.7, yaw: -15, scale: 1.4, collider: [0.5, 0.5, 0.5] },
+      { url: "/models/barrel.glb", along: -3.4, into: front + 0.8, yaw: 0, scale: 1.4, collider: [0.5, 0.7, 0.5] },
+      { url: "/models/pallet.glb", along: -4.6, into: front + 0.9, yaw: 25, scale: 1.5 },
+    ],
+    plants: [
+      { url: "/models/tree_big.glb", along: -(ca + 1.6), into: front - 1.2, scale: 3.0 },
+      { url: "/models/tree_pine_big.glb", along: ca + 1.6, into: front - 1.2, scale: 3.2 },
+      { url: "/models/shrub.glb", along: -(ca + 1.4), into: si + 2.0, scale: 1.6 },
+      { url: "/models/shrub.glb", along: ca + 1.4, into: si + 2.0, scale: 1.6 },
+    ],
+  });
+
+  // Warm forge glow beside the workbench line.
+  accent(app, markers, f, -(ca - 0.8), -(si + 3.4), 1.8, "firepit", { range: 9 });
+  pushFootprint(colliders, "workshop", f, sa, si, def.height / 2, def.height / 2);
 }
 
-/** Library — a quiet reading hall framed by the great tree + stacked books. */
+/** Library — a stately hall fronted by a reading courtyard (books/benches/lamps). */
 function buildLibrary(
   app: pc.AppBase,
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
 ): void {
-  const batch = new KitBatch();
-  buildRect(app, batch, f, {
-    halfAlong: 3.2,
-    halfInto: 2.8,
-    wallScale: WALL_SCALE,
-    front: "door",
-    windowSides: true,
-    roof: true,
-    floor: true,
-  });
-  // Columns flanking the doorway.
-  batch.add(f, "/models/build_column.glb", -1.6, -3.0, 0, 0, [1, WALL_SCALE, 1]);
-  batch.add(f, "/models/build_column.glb", 1.6, -3.0, 0, 0, [1, WALL_SCALE, 1]);
-  // Stacked books at the threshold + reading lamps.
-  batch.add(f, "/models/books.glb", -1.0, -3.6, 0, 25, 1.6);
-  batch.add(f, "/models/books.glb", 1.1, -3.7, 0, -35, 1.4);
-  batch.add(f, "/models/lamp.glb", 2.2, -3.4, 0, 0, 1.4);
-  batch.flush(app);
+  const def = BUILDINGS.library;
+  placeBuilding(app, f, def);
 
-  // The great tree of knowledge framing the hall (loaded as its own instance).
-  loadModelInstances(app, "/models/tree_knowledge.glb", [
-    {
-      position: [toWorld(f, -4.4, 1.6).x, 0, toWorld(f, -4.4, 1.6).z],
-      yaw: f.faceYaw,
-      scale: 5.2,
-    },
-  ]);
+  const sa = def.halfAlong;
+  const si = def.halfInto;
+  const ca = sa + COURT_ALONG_MARGIN;
+  const front = -(si + COURT_DEPTH);
 
-  accent(app, markers, f, 2.2, -3.4, 1.7, "lantern");
-  pushFootprint(colliders, "library", f, 3.6, 3.2, WALL_SCALE);
-  // Tree trunk collider.
-  const tw = toWorld(f, -4.4, 1.6);
-  colliders.push({
-    id: "library-tree",
-    type: "box",
-    position: [tw.x, 3.0, tw.z],
-    halfExtents: [1.0, 3.0, 1.0],
-    rotation: [0, 0, 0],
-    role: "prop",
+  stageCourtyard(app, f, def, colliders, markers, "library", {
+    props: [
+      // Stacked books flanking the doorway (on the apron, off the walkway).
+      { url: "/models/books.glb", along: -3.2, into: -(si + 1.0), yaw: 25, scale: 1.7 },
+      { url: "/models/books.glb", along: 3.0, into: -(si + 1.1), yaw: -35, scale: 1.5 },
+      // Reading benches lining the side edges, facing into the court.
+      { url: "/models/bench_park.glb", along: -(ca - 0.9), into: -(si + 2.6), yaw: 90, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+      { url: "/models/bench_park.glb", along: -(ca - 0.9), into: -(si + 5.0), yaw: 90, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+      { url: "/models/bench_park.glb", along: ca - 0.9, into: -(si + 2.6), yaw: -90, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+      { url: "/models/bench_park.glb", along: ca - 0.9, into: -(si + 5.0), yaw: -90, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+      // A double lamp post lighting the reading court.
+      { url: "/models/lamp_post_double.glb", along: 0, into: front + 1.0, yaw: 0, scale: 1.6 },
+    ],
+    plants: [
+      { url: "/models/tree_big.glb", along: -(ca + 1.6), into: front - 1.2, scale: 3.2 },
+      { url: "/models/tree_big.glb", along: ca + 1.6, into: front - 1.2, scale: 3.2 },
+      { url: "/models/shrub.glb", along: -(ca + 1.2), into: -(si + 1.0), scale: 1.7 },
+      { url: "/models/shrub.glb", along: ca + 1.2, into: -(si + 1.0), scale: 1.7 },
+      { url: "/models/flower_yellow.glb", along: -2.6, into: front + 0.6, scale: 1.4 },
+      { url: "/models/flower_yellow.glb", along: 2.6, into: front + 0.6, scale: 1.4 },
+    ],
   });
+
+  // Calm lantern glow at the threshold.
+  accent(app, markers, f, sa + 0.6, -(si + 0.8), 3.0, "lantern");
+  pushFootprint(colliders, "library", f, sa, si, def.height / 2, def.height / 2);
 }
 
-/** AI Laboratory — a low glass-walled lab with cool indicator lights + rigs. */
+/** AI Laboratory — a modern dominant block with a cool, fenced tech courtyard. */
 function buildAiLaboratory(
   app: pc.AppBase,
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
 ): void {
-  const batch = new KitBatch();
-  buildRect(app, batch, f, {
-    halfAlong: 3.4,
-    halfInto: 2.8,
-    wallScale: LOW_WALL_SCALE, // low, modern profile
-    front: "door",
-    windowSides: true, // "glass" walls
-    roof: true,
-    floor: true,
-  });
-  // Corner columns + a central cylinder "core" prototype rig.
-  batch.add(f, "/models/build_column.glb", -2.8, -2.6, 0, 0, [0.9, LOW_WALL_SCALE, 0.9]);
-  batch.add(f, "/models/build_column.glb", 2.8, -2.6, 0, 0, [0.9, LOW_WALL_SCALE, 0.9]);
-  batch.add(f, "/models/build_cylinder.glb", 0, 0.8, 0, 0, [1.1, LOW_WALL_SCALE, 1.1]);
-  // Prototype rigs: cubes + a smaller cylinder.
-  batch.add(f, "/models/build_cube.glb", -1.8, 0.4, 0, 20, 0.9);
-  batch.add(f, "/models/build_cylinder.glb", 1.8, 0.6, 0, 0, [0.6, 1.0, 0.6]);
-  batch.flush(app);
+  const def = BUILDINGS["ai-laboratory"];
+  placeBuilding(app, f, def);
 
-  // Tiny emissive "indicator lights" dotted across the rigs (cool palette).
+  const sa = def.halfAlong;
+  const si = def.halfInto;
+  const ca = sa + COURT_ALONG_MARGIN;
+  const front = -(si + COURT_DEPTH);
+
+  stageCourtyard(app, f, def, colliders, markers, "ai-laboratory", {
+    coolLights: true,
+    props: [
+      // Equipment crates / barrels lining the side edges.
+      { url: "/models/crate.glb", along: ca - 0.9, into: -(si + 1.4), yaw: 0, scale: 1.4, collider: [0.5, 0.5, 0.5] },
+      { url: "/models/crate_large.glb", along: ca - 0.9, into: -(si + 3.2), yaw: 10, scale: 1.5, collider: [0.7, 0.7, 0.7] },
+      { url: "/models/barrel.glb", along: ca - 1.0, into: -(si + 5.0), yaw: 0, scale: 1.3, collider: [0.5, 0.7, 0.5] },
+      { url: "/models/crate.glb", along: -(ca - 0.9), into: -(si + 1.4), yaw: 0, scale: 1.4, collider: [0.5, 0.5, 0.5] },
+      { url: "/models/chest.glb", along: -(ca - 0.9), into: -(si + 3.2), yaw: -10, scale: 1.4, collider: [0.6, 0.4, 0.4] },
+    ],
+    plants: [
+      { url: "/models/shrub.glb", along: -(ca + 1.4), into: front - 1.0, scale: 1.8 },
+      { url: "/models/shrub.glb", along: ca + 1.4, into: front - 1.0, scale: 1.8 },
+      { url: "/models/s_tree_tall.glb", along: -(ca + 1.6), into: si + 1.6, scale: 3.0 },
+      { url: "/models/s_tree_tall.glb", along: ca + 1.6, into: si + 1.6, scale: 3.0 },
+    ],
+  });
+
+  // A row of cool emissive "indicator lights" lining the front of the lab on
+  // the apron, just clear of the wall (decorative — no colliders).
   const indicatorMat = makeMaterial(LAYOUT.marker.coolColor, { emissive: true });
-  for (let i = 0; i < 6; i++) {
-    const along = -2.4 + i * 0.95;
-    const into = -0.4 + (i % 2) * 0.8;
-    const w = toWorld(f, along, into);
-    addPrimitive(app, "box", indicatorMat, [w.x, 1.1 + (i % 3) * 0.25, w.z], [0.12, 0.12, 0.12]);
+  for (let i = 0; i < 7; i++) {
+    const along = -3.0 + i * 1.0;
+    const w = toWorld(f, along, -(si + 0.5));
+    addPrimitive(app, "box", indicatorMat, [w.x, 0.7 + (i % 3) * 0.25, w.z], [0.14, 0.14, 0.14]);
   }
 
-  // Cooler accent glow for the energised/inquisitive mood.
-  accent(app, markers, f, 0, 0.8, 2.2, "lantern", { cool: true, range: 11 });
-  pushFootprint(colliders, "ai-laboratory", f, 3.8, 3.2, LOW_WALL_SCALE);
+  // Cooler accent glow at the threshold for the energised/inquisitive mood.
+  accent(app, markers, f, 0, -(si + 0.8), 2.6, "lantern", { cool: true, range: 12 });
+  pushFootprint(colliders, "ai-laboratory", f, sa, si, def.height / 2, def.height / 2);
 }
 
-/** Observatory — a raised stone drum + dome topped by the obelisk, on a rise. */
+/** Observatory — a tall tower fronted by a charting courtyard with a low wall. */
 function buildObservatory(
   app: pc.AppBase,
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
 ): void {
-  const batch = new KitBatch();
-  // Hexagonal stone base / rise.
-  batch.add(f, "/models/build_hexagon.glb", 0, 0, 0, 0, [4.0, 1.4, 4.0]);
-  // Stone drum on top of the base.
-  batch.add(f, "/models/build_cylinder.glb", 0, 0, 1.4, 0, [3.0, 2.2, 3.0]);
-  // Charting table (bench + a cube) on the rise, facing the valley.
-  batch.add(f, "/models/bench.glb", 2.0, -1.6, 1.5, 90, 1.6);
-  batch.add(f, "/models/build_cube.glb", -1.8, -1.4, 1.5, 0, [1.2, 0.6, 0.8]);
-  batch.flush(app);
+  const def = BUILDINGS.observatory;
+  placeBuilding(app, f, def);
 
-  // Dome (flattened sphere) crowning the drum, with the obelisk as the finial.
-  const domeMat = makeMaterial([0.62, 0.66, 0.72]);
-  const top = toWorld(f, 0, 0);
-  addPrimitive(app, "sphere", domeMat, [top.x, 4.6, top.z], [6.0, 3.4, 6.0]);
-  loadModelInstances(app, "/models/obelisk.glb", [
-    { position: [top.x, 5.4, top.z], yaw: f.faceYaw, scale: 3.0 },
-  ]);
+  const sa = def.halfAlong;
+  const si = def.halfInto;
+  const ca = sa + COURT_ALONG_MARGIN;
+  const front = -(si + COURT_DEPTH);
 
-  accent(app, markers, f, 2.0, -1.6, 2.4, "lantern");
-  // Tall base collider (the rise + drum).
-  pushFootprint(colliders, "observatory", f, 3.6, 3.6, 3.0);
+  stageCourtyard(app, f, def, colliders, markers, "observatory", {
+    props: [
+      // Charting benches + a crate of instruments facing the valley (the road).
+      { url: "/models/bench_park.glb", along: -(ca - 0.9), into: -(si + 2.4), yaw: 90, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+      { url: "/models/bench_park.glb", along: ca - 0.9, into: -(si + 2.4), yaw: -90, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+      { url: "/models/crate.glb", along: -3.4, into: front + 0.8, yaw: 10, scale: 1.4, collider: [0.5, 0.5, 0.5] },
+      { url: "/models/barrel.glb", along: 3.4, into: front + 0.8, yaw: 0, scale: 1.3, collider: [0.5, 0.7, 0.5] },
+      { url: "/models/obelisk.glb", along: ca - 1.0, into: -(si + 4.6), yaw: 0, scale: 1.6, collider: [0.5, 1.2, 0.5] },
+    ],
+    plants: [
+      { url: "/models/tree_pine_big.glb", along: -(ca + 1.6), into: front - 1.0, scale: 3.2 },
+      { url: "/models/tree_pine_big.glb", along: ca + 1.6, into: front - 1.0, scale: 3.2 },
+      { url: "/models/shrub.glb", along: -(ca + 1.2), into: si + 1.6, scale: 1.6 },
+      { url: "/models/shrub.glb", along: ca + 1.2, into: si + 1.6, scale: 1.6 },
+    ],
+  });
+
+  accent(app, markers, f, sa + 0.6, -(si + 0.6), 2.6, "lantern");
+  pushFootprint(colliders, "observatory", f, sa, si, def.height / 2, def.height / 2);
 }
 
-/** Lighthouse — a tall stacked tower with a bright warm beacon + a small dock. */
+/**
+ * Lighthouse — the tallest tower, crowned with a bright warm BEACON point light
+ * at its top, fronted by a small harbour-style courtyard (barrels, crates, a
+ * bench, a low fence). No literal lighthouse model exists; a clean tall tower +
+ * beacon reads better than a fragile assembly.
+ */
 function buildLighthouse(
   app: pc.AppBase,
   f: StructureFrame,
   colliders: ColliderSpec[],
   markers: Marker[],
 ): void {
-  const batch = new KitBatch();
-  // Stacked cylinder drums forming the tapering tower.
-  const drums = 5;
-  for (let i = 0; i < drums; i++) {
-    const y = i * 2.4;
-    const r = 2.4 - i * 0.28;
-    batch.add(f, "/models/build_cylinder.glb", 0, 0, y, 0, [r, 1.2, r]);
-  }
-  // Column lantern-room post at the top.
-  batch.add(f, "/models/column.glb", 0, 0, drums * 2.4, 0, [1.4, 2.2, 1.4]);
-  // A small plank dock reaching toward the water (front, low to the ground).
-  for (let k = 0; k < 3; k++) {
-    batch.add(f, "/models/build_floor.glb", 0, -3.0 - k * 2.2, 0.05, 0, 2.2);
-  }
-  batch.flush(app);
+  const def = BUILDINGS.lighthouse;
+  placeBuilding(app, f, def);
 
-  // Bright warm beacon at the top.
-  const beaconY = drums * 2.4 + 2.0;
-  accent(app, markers, f, 0, 0, beaconY, "firepit", { intensity: 4.0, range: 26 });
-  // Tall, narrow tower collider.
-  pushFootprint(colliders, "lighthouse", f, 2.6, 2.6, beaconY * 0.5, beaconY * 0.5);
+  const sa = def.halfAlong;
+  const si = def.halfInto;
+  const ca = sa + COURT_ALONG_MARGIN;
+  const front = -(si + COURT_DEPTH);
+
+  stageCourtyard(app, f, def, colliders, markers, "lighthouse", {
+    props: [
+      // Harbour barrels + crates at the foot of the tower.
+      { url: "/models/barrel.glb", along: ca - 1.0, into: -(si + 1.6), yaw: 0, scale: 1.4, collider: [0.5, 0.7, 0.5] },
+      { url: "/models/barrel.glb", along: ca - 1.4, into: -(si + 2.8), yaw: 0, scale: 1.3, collider: [0.5, 0.6, 0.5] },
+      { url: "/models/barrel_open.glb", along: -(ca - 1.0), into: -(si + 1.6), yaw: 0, scale: 1.4, collider: [0.5, 0.6, 0.5] },
+      { url: "/models/crate.glb", along: -(ca - 1.2), into: -(si + 3.0), yaw: 15, scale: 1.4, collider: [0.5, 0.5, 0.5] },
+      { url: "/models/bench.glb", along: 0, into: front + 1.0, yaw: 0, scale: 1.6, collider: [1.0, 0.4, 0.4] },
+    ],
+    plants: [
+      { url: "/models/tree_pine_big.glb", along: -(ca + 1.6), into: front - 1.0, scale: 3.0 },
+      { url: "/models/shrub.glb", along: ca + 1.4, into: front - 1.0, scale: 1.8 },
+      { url: "/models/shrub.glb", along: -(ca + 1.2), into: si + 1.6, scale: 1.6 },
+    ],
+  });
+
+  // Bright warm beacon at the top of the (now much taller) tower.
+  const beaconY = def.height + 0.6;
+  accent(app, markers, f, 0, 0, beaconY, "firepit", { intensity: 4.5, range: 32 });
+  pushFootprint(colliders, "lighthouse", f, sa, si, def.height / 2, def.height / 2);
 }
 
 /**
